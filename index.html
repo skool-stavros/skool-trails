@@ -130,6 +130,20 @@ select,input{width:100%;padding:14px;border-radius:14px;border:3px solid var(--i
 @keyframes fxPop{0%{transform:scale(.3);opacity:0}70%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}
 
 /* Sticker album modal grid */
+/* Word Jumble */
+.jzLine{min-height:62px;border:3px dashed var(--ink);border-radius:14px;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start;background:#FFFBE6;margin:8px 0}
+.jzLine.empty::before{content:attr(data-ph);opacity:.45;font-weight:800;font-size:13px;align-self:center;width:100%;text-align:center}
+.jzBank{min-height:62px;border:3px solid var(--ink);border-radius:14px;padding:8px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start;background:#fff;margin:8px 0;box-shadow:3px 3px 0 var(--ink)}
+.jzLine.over,.jzBank.over{background:#E3F6FF}
+.jzLine.ok{border-style:solid;background:#D8FFE0}
+.jzLine.bad{border-style:solid;background:#FFE3E3}
+.jzTile{border:3px solid var(--ink);border-radius:10px;padding:8px 11px;font-weight:900;font-size:16px;line-height:1.1;background:#FFC800;color:var(--ink);box-shadow:2px 2px 0 var(--ink);cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none}
+.jzTile.punct{background:#BFE4FF;min-width:36px;text-align:center}
+.jzTile.dragging{opacity:.25}
+.jzGhost{position:fixed;z-index:10100;pointer-events:none;transform:scale(1.08) rotate(-2deg);opacity:.95;box-shadow:4px 6px 0 rgba(0,0,0,.3);margin:0}
+.jzLocked .jzTile{cursor:default}
+.jzBtnRow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.jzHint{font-size:12px;font-weight:700;opacity:.7;text-align:center}
 /* Brain Gym (solo practice) */
 .pgTitle{font-weight:900;font-size:20px;text-align:center}
 .pgSub{font-size:12px;font-weight:700;opacity:.7;text-align:center;margin:2px 0 12px}
@@ -420,6 +434,7 @@ select,input{width:100%;padding:14px;border-radius:14px;border:3px solid var(--i
         <button class="iconBtn" id="menuExtraBtn" type="button"><span class="iconGlyph">🌟</span><span class="iconLabel">Extra-Q</span></button>
         <button class="iconBtn" id="menuStickersBtn" type="button"><span class="iconGlyph">🎁</span><span class="iconLabel">Stickers</span></button>
         <button class="iconBtn" id="menuPracticeBtn" type="button"><span class="iconGlyph">🧠</span><span class="iconLabel">Brain Gym</span></button>
+        <button class="iconBtn" id="menuJumbleBtn" type="button"><span class="iconGlyph">🧩</span><span class="iconLabel">Word Jumble</span></button>
       </div>
     </div>
   </div>
@@ -488,6 +503,13 @@ select,input{width:100%;padding:14px;border-radius:14px;border:3px solid var(--i
     </div>
   </div>
 
+  <div class="modalOverlay" id="modalJumble">
+    <div class="modalBox card">
+      <button class="modalCloseBtn" type="button" data-close-modal aria-label="Close">✕</button>
+      <div id="jumbleBody"></div>
+    </div>
+  </div>
+
   <div class="modalOverlay" id="modalPractice">
     <div class="modalBox card">
       <button class="modalCloseBtn" type="button" data-close-modal aria-label="Close">✕</button>
@@ -548,7 +570,11 @@ select,input{width:100%;padding:14px;border-radius:14px;border:3px solid var(--i
   </div>
 </div>
 
+<!-- Your own settings (sheet tab numbers) live in settings.js, so a new game file never needs them pasted again. -->
+<script src="settings.js"></script>
 <script>
+// Settings from settings.js (sheet tab numbers). Must be defined first: later code reads it while loading.
+const SKOOL_SETTINGS=(typeof window!=="undefined"&&window.SKOOL_SETTINGS)||{};
 /* ============ AUDIO ENGINE ============
    Background music is the real track you uploaded (game-music.m4a),
    played through a plain <audio> element and looped. The two short
@@ -1130,6 +1156,280 @@ function startPractice(s,mode){
   showQuestion();
 }
 
+/* ============ WORD JUMBLE: put the words in order ============
+   5 jumbled sentences per student per day (once a day). Every word AND the
+   final . ? ! is its own tile; drag tiles down into the answer line (or just
+   tap them), then press Check. Each class level has its own sentence bank,
+   ordered easy -> harder; a student's position is the number of rounds they
+   have finished x 5, so everybody starts at the beginning and never sees a
+   sentence again until the whole bank has been used. */
+const JUMBLE_BANKS={"EJAB":["I am Anna.","My name is Tom.","This is a book.","I am six.","It is red.","She is my mum.","He is my dad.","I have a pen.","This is my bag.","It is a cat.","I like pizza.","He likes apples.","What is your name?","How old are you?","I am seven years old.","Is this a dog?","Yes, it is.","No, it isn't.","I can run.","She can jump.","We are friends.","They are happy.","The sky is blue.","I have two brothers.","My sister is nine.","Where is my pen?","It is on the desk.","The cat is under the chair.","I like my school.","Open your book.","Close the door.","Sit down, please.|Please sit down.","Stand up, please.|Please stand up.","Good morning, teacher.","Good night, mum.","I can see a bird.","The ball is big.","My bag is small.","I have a red pencil.","Do you like milk?","Yes, I do.","No, I don't.","Can you swim?","He has a new bike.","We play in the park.","The dog is in the garden.","My mum cooks dinner.","I eat an apple.","It is a sunny day.","Thank you very much.","What colour is it?","I love my family."],"EA":["I live in a small house.","My brother plays football.","She wears a blue dress.","We have lunch at school.|At school we have lunch.","There is a cat on the sofa.","There are three books on the table.","What do you like?","Where do you live?","I get up at seven o'clock.","He goes to school by bus.","My mum works in a shop.","Do you have a pet?","Yes, I have a dog.","She doesn't like carrots.","They are in the kitchen.","It is raining today.|Today it is raining.","I brush my teeth every morning.|Every morning I brush my teeth.","My favourite colour is green.","We play games in the playground.","He has a big brown dog.","How many pencils have you got?","I have got five pencils.","My grandma makes delicious cakes.","The children are in the garden.","Can I have some water, please?","I can ride a bike.","She is reading a book.","They are playing in the park.","What time is it?","It is half past eight.","My birthday is in May.","I do my homework after school.|After school I do my homework.","Our teacher is very kind.","The bus is late today.","He is wearing a red hat.","We eat breakfast together.","My room is next to the kitchen.","I want a glass of juice.","Look at the beautiful flowers.","Is she your sister?","There isn't any milk.","She likes to dance.","It's cold in winter.|In winter it's cold.","My cat sleeps all day.","We go to the beach in summer.|In summer we go to the beach.","Don't run in the classroom.","Please listen to the teacher.","I am hungry and thirsty.","The shop opens at nine.","Let's play a game."],"EB":["The Wilsons live in a big house.","Mr Wilson works in an office.","Mrs Wilson is cooking dinner now.|Now Mrs Wilson is cooking dinner.","The children are watching TV.","What are you doing?","I am doing my homework.","Yesterday we went to the zoo.|We went to the zoo yesterday.","She visited her grandparents last weekend.|Last weekend she visited her grandparents.","They didn't go to school on Sunday.|On Sunday they didn't go to school.","Did you enjoy the film?","Yes, we did.","How much is this T-shirt?","It costs ten euros.","My father usually drives to work.|Usually my father drives to work.","I often help my mother in the kitchen.","There are some apples in the fridge.","Is there any bread?","We need some milk and eggs.","He is taller than his brother.","This book is more interesting than that one.","My bedroom is bigger than the bathroom.","What did you have for breakfast?","I had toast and orange juice.","We are going to visit London next month.|Next month we are going to visit London.","She is going to buy a new dress.","Can you help me with my homework?","You must wear a helmet.","You mustn't talk in the library.","I have never seen a lion.","Have you ever been to Paris?","My uncle lives in a small village.","The film starts at seven thirty.","Take the second street on the left.","The bank is opposite the post office.","He plays the guitar very well.","She speaks English slowly and clearly.","It was a cold and windy day.","We were very tired after the trip.","The train leaves in ten minutes.","Don't forget your umbrella.","I would like a cup of tea, please.","What would you like to drink?","They have lived here for five years.","My favourite subject is history.","How often do you go swimming?","I go swimming twice a week.|Twice a week I go swimming.","She is the best student in the class.","Our teacher gave us a lot of homework.","The weather is getting better.","If it rains, we will stay at home.|We will stay at home if it rains."],"EA1":["My name is Maria and I am from Greece.","I'm a student and I live in Athens.","She is twelve years old.","We have two cats and a dog.","What is your favourite subject?","My favourite subject is art.","Where is the bus stop?","It is next to the supermarket.","He doesn't play tennis on Mondays.|On Mondays he doesn't play tennis.","Do they speak English at home?","I usually have cereal for breakfast.|Usually I have cereal for breakfast.","My brother never drinks coffee.","What time do you go to bed?","I go to bed at ten o'clock.","There are twenty students in my class.","There isn't a park near my house.","She can speak three languages.","He can't play the piano.","Can you open the window, please?","Where were you yesterday?","I was at my grandmother's house.","The weather was nice last Sunday.|Last Sunday the weather was nice.","They are watching a film at the moment.|At the moment they are watching a film.","I am not listening to music now.|Now I am not listening to music.","Is your mother working today?","How much is the blue jacket?","It's fifty euros.","I want to buy some new shoes.","Would you like a sandwich?","No, thank you.","She has got long brown hair.","He hasn't got a car.","Have you got any brothers or sisters?","My friends and I play basketball on Fridays.|On Fridays my friends and I play basketball.","On Saturdays we visit our grandparents.|We visit our grandparents on Saturdays.","Turn left at the traffic lights.","The museum is open from nine to five.","I like swimming but I don't like running.","My father cooks dinner on Sundays.|On Sundays my father cooks dinner.","These are my new classmates.","This is my sister's room.","Their house has a big garden.","We eat pizza every Friday evening.|Every Friday evening we eat pizza.","Why are you crying?","Because I lost my keys.","Please give me a pencil.","What does this word mean?","How do you spell your surname?","It's too hot in the kitchen.","Let's meet in front of the cinema at six."],"EA2":["Last summer we travelled to Italy by plane.|We travelled to Italy by plane last summer.","I didn't do my homework because I was ill.","What did you do at the weekend?","We watched a funny film and ate popcorn.","She has already finished her project.","Have you ever tried Japanese food?","He hasn't called me yet.","This is the most beautiful beach in Greece.","My new phone is cheaper than yours.","I'm going to study medicine at university.","We will probably stay at home tomorrow.|Tomorrow we will probably stay at home.","If you study hard, you will pass the exam.|You will pass the exam if you study hard.","You should drink more water every day.","You don't have to wear a uniform on Fridays.","Could you tell me the way to the station?","I used to play the violin when I was little.|When I was little I used to play the violin.","While I was walking home, it started to rain.|It started to rain while I was walking home.","She was cooking when the phone rang.|When the phone rang she was cooking.","How long have you lived in this city?","I have lived here since 2018.","Do you know where she works?","I can't find my wallet anywhere.","He told me that he was very tired.","There was nobody at home when I arrived.|When I arrived there was nobody at home.","Everybody enjoyed the party except me.","We need to leave early to catch the train.","I'm afraid I can't come to your party.","She asked me to help her with the shopping.","The restaurant was so crowded that we left.","Although it was cold, we went for a walk.|We went for a walk although it was cold.","My cousin is learning to drive.","Which colour do you prefer, red or blue?","He is the tallest boy in our class.","They have been married for ten years.","Would you mind opening the window?","I'll call you as soon as I get home.|As soon as I get home I'll call you.","It takes me twenty minutes to get to school.","What's the matter with you?","I have a terrible headache today.|Today I have a terrible headache.","You'd better see a doctor.","We got lost because we forgot the map.","The children are too young to go alone.","She isn't old enough to drive a car.","Let me know if you need any help.","He works as a nurse in a big hospital.","My parents bought me a bike for my birthday.","It was the best holiday of my life.","Don't worry, everything will be fine.","Can I borrow your pen for a moment?","They never go out on school nights."],"EB1":["If I had more time, I would learn another language.|I would learn another language if I had more time.","She said that she had already seen the film.","The book was written by a famous author.","I wish I could speak French fluently.","He has been working here for more than ten years.","By the time we arrived, the concert had started.|The concert had started by the time we arrived.","You must have left your keys at school.","I'm used to getting up early in the morning.","She suggested going to the cinema after dinner.","I'm looking forward to seeing you again.","Despite the rain, we enjoyed the picnic.|We enjoyed the picnic despite the rain.","I'll take an umbrella in case it rains.","The man who lives next door is a doctor.","This is the restaurant where we celebrated my birthday.","Nobody knows what will happen in the future.","He asked me whether I wanted to join the team.","You shouldn't have shouted at your little brother.","The new shopping centre is being built near the river.","We were told to wait outside the office.","I've lost my passport, so I can't travel tomorrow.","She is so talented that everyone admires her.","It was such a boring film that I fell asleep.","Unless you hurry up, we'll miss the bus.|We'll miss the bus unless you hurry up.","I'd rather stay at home than go to the party.","He apologised for being late for the meeting.","She's not as tall as her older sister.","The more you practise, the better you get.","I've never been so scared in my whole life.","Would you like me to carry your bag?","If you had asked me, I would have helped you.|I would have helped you if you had asked me.","They are thinking of moving to a bigger flat.","My grandfather used to tell us amazing stories.","I can't stand waiting in long queues.","Whenever I feel stressed, I go for a long walk.|I go for a long walk whenever I feel stressed.","The teacher made us rewrite the whole essay.","He doesn't allow his children to watch much television.","Having finished my homework, I went out with friends.|I went out with friends having finished my homework.","It's high time we started planning the trip.","I was wondering if you could lend me some money.","There's a chance that it will snow tomorrow.","She spent the whole afternoon cleaning her room.","He keeps forgetting where he puts his glasses.","The tickets were sold out within a few hours.","I'm not sure whether they have already left.","You can take either the bus or the underground.","Neither of my brothers likes spicy food.","Both of them failed the driving test.","It doesn't matter how long it takes.","The police are investigating the robbery at the bank.","I'd like to know how much this laptop costs."],"EB12":["Had I known about the problem, I would have called you.","The report is expected to be published next month.","She denied having taken the money from the drawer.","Not only did he lose his job, but he also lost his house.","I wish I had studied harder when I was at school.|When I was at school I wish I had studied harder.","Were it not for your help, I would never have finished.","The house has been renovated several times over the years.|Over the years the house has been renovated several times.","He is said to be the richest man in the country.","It's no use complaining about the weather.","I've been trying to reach you all morning.","She is bound to pass the exam with her knowledge.","They should have booked the tickets in advance.","What you said yesterday really surprised me.","It was the manager who made the final decision.","The more expensive the hotel, the better the service.","In spite of being exhausted, he kept running.|He kept running in spite of being exhausted.","I would rather you didn't tell anyone about this.","She came across an old photograph in the attic.","We ran out of petrol on the way to the airport.","He managed to persuade her to change her mind.","The meeting has been put off until next Thursday.","Hardly had we sat down when the lights went out.","As far as I know, the shop closes at six.|The shop closes at six as far as I know.","It turned out that nobody had read the instructions.","I'm not in the mood for going out tonight.","You can't judge a book by its cover.","If only I could turn back time.","She insisted on paying for the whole meal.","The company is likely to announce new products soon.|Soon the company is likely to announce new products.","He brought up the subject during lunch.|During lunch he brought up the subject.","They have been arguing since early this morning.","The singer, who was born in Crete, is world famous.","I take it for granted that you will come.","No sooner had she left than the phone rang.","This is the house in which my grandparents grew up.","We should take advantage of the good weather.","It's worth visiting the old town at night.","He gave up smoking two years ago.|Two years ago he gave up smoking.","Much to my surprise, they offered me the job.|They offered me the job, much to my surprise.","You'd better not touch that wire.","The students were asked to hand in their essays.","Provided that you work hard, you'll succeed.|You'll succeed provided that you work hard.","I came to the conclusion that she was right.","The film was so moving that many people cried.","It is essential that everyone arrives on time.","Living in a big city has both advantages and disadvantages.","Instead of complaining, you should try to find a solution.|You should try to find a solution instead of complaining.","We had our car repaired at the local garage.","She is far more experienced than the other candidates.","I'll get in touch with you as soon as possible."],"EB2":["Contrary to what many people believe, sharks rarely attack humans.|Sharks rarely attack humans, contrary to what many people believe.","The government is under pressure to reduce unemployment.","Having been warned several times, he still ignored the rules.|He still ignored the rules, having been warned several times.","It is high time the authorities took stronger action.","She would have been promoted if she hadn't made that mistake.|If she hadn't made that mistake, she would have been promoted.","What really matters is that you did your best.","The more I think about it, the less sense it makes.","Scarcely had the match begun when it started to pour.","Many species are in danger of becoming extinct.","He turned down the offer because it wasn't well paid.|Because it wasn't well paid, he turned down the offer.","I find it hard to concentrate when it's noisy.|When it's noisy I find it hard to concentrate.","They are said to have discovered a new planet.","The research team came up with an innovative solution.","Neither the students nor the teacher knew the answer.","By this time next year, I will have graduated.|I will have graduated by this time next year.","It wasn't until midnight that the storm calmed down.","We can't afford to waste any more time.","The decision was made in spite of strong opposition.|In spite of strong opposition the decision was made.","She regrets not having accepted the job in London.","Whether you agree or not, the rules must be followed.|The rules must be followed whether you agree or not.","He is by far the most reliable employee we have.","The novel, which was published in 1998, became a bestseller.","I'd appreciate it if you could reply by Friday.","On no account should you open this door.","The company has been fined for polluting the river.","It goes without saying that safety comes first.","Not until I moved abroad did I appreciate my family.","Prices have risen sharply over the past decade.|Over the past decade prices have risen sharply.","She has a tendency to exaggerate everything.","We were on the verge of giving up.","The film lived up to all my expectations.","He was accused of stealing confidential documents.","There is no point in arguing with him.","The negotiations broke down after three hours.|After three hours the negotiations broke down.","Despite his age, he is remarkably fit and active.|He is remarkably fit and active despite his age.","I can't help feeling that something is wrong.","A large number of tourists visit the island every year.|Every year a large number of tourists visit the island.","It makes no difference whether we go today or tomorrow.","She took the blame for something she hadn't done.","He would sooner starve than ask for help.","The more carefully you read, the fewer mistakes you make.","They carried out a survey among two thousand teenagers.","She didn't turn up until everyone had left.","This method has proved to be extremely effective.","Under no circumstances will refunds be given.","It dawned on me that I had left the oven on.","We have no choice but to cancel the event.","Having studied the problem, the experts suggested a new approach.|The experts suggested a new approach, having studied the problem.","The sooner we start, the sooner we can finish.","Apart from a few minor errors, your essay was excellent.|Your essay was excellent, apart from a few minor errors."],"EC12":["Little did she realise how much her decision would affect others.","The proposal was met with a mixture of enthusiasm and scepticism.","Only by working together can we overcome these challenges.","He has a knack for making complicated ideas sound simple.","Had it not been for the timely intervention, the outcome would have been disastrous.|The outcome would have been disastrous had it not been for the timely intervention.","It is widely acknowledged that education shapes society.","The author's latest novel is a thought-provoking exploration of identity.","Notwithstanding the setbacks, the team remained remarkably resilient.|The team remained remarkably resilient, notwithstanding the setbacks.","She was reluctant to concede that her argument had flaws.","What sets this region apart is its extraordinary biodiversity.","The findings call into question many long-held assumptions.","Rarely does one encounter such genuine hospitality.","Far from being a nuisance, the criticism proved invaluable.|The criticism proved invaluable, far from being a nuisance.","It would be naive to assume that the problem will resolve itself.","The scheme was abandoned for want of public support.","Whatever the outcome, we must accept responsibility for our actions.|We must accept responsibility for our actions, whatever the outcome.","In hindsight, the warning signs were impossible to ignore.|The warning signs were impossible to ignore in hindsight.","He gave a compelling account of his years in exile.","The more compelling the evidence, the harder it is to dismiss.","Few people fully grasp the implications of these changes.","Rather than dwell on the past, she focused on rebuilding her career.|She focused on rebuilding her career rather than dwell on the past.","The committee is at pains to emphasise its impartiality.","Be that as it may, we cannot ignore the economic consequences.","So persuasive was his speech that the audience gave him a standing ovation.","They were taken aback by the sheer scale of the project.","It is incumbent upon us to protect vulnerable communities.","The negotiations hinge on whether both sides are willing to compromise.","To say that the results were disappointing would be an understatement.","Her remarks were taken out of context by the press.","Under the guise of reform, the government tightened its grip.|The government tightened its grip under the guise of reform.","It stands to reason that quality takes time.","He was branded a traitor for revealing the truth.","This is by no means the first time such a thing has happened.","The sheer persistence of the volunteers paid off in the end.|In the end the sheer persistence of the volunteers paid off.","No sooner had the policy been announced than protests erupted.","Her unorthodox approach yielded surprisingly positive results.","They managed to reach a consensus despite deep-seated differences.|Despite deep-seated differences they managed to reach a consensus.","What began as a modest hobby grew into a thriving business.","One cannot overstate the importance of financial literacy.","The relics were unearthed during a routine excavation.|During a routine excavation the relics were unearthed.","Seldom has a debut album received such widespread acclaim.","He felt a pang of guilt for having doubted her.","The ramifications of the ruling will be felt for decades.","We ought to weigh the pros and cons before committing ourselves.|Before committing ourselves we ought to weigh the pros and cons.","Having lost everything, she resolved to start afresh.|She resolved to start afresh, having lost everything.","There is a fine line between confidence and arrogance.","The crowd dispersed as soon as the rain began to fall.|As soon as the rain began to fall the crowd dispersed.","He was determined to leave no stone unturned.","Few would dispute that the discovery changed the course of history.","Her eloquence was matched only by her humility."],"DA":["Ich heiße Anna.","Das ist meine Mutter.","Mein Vater heißt Peter.","Ich habe einen Bruder.","Wie heißt du?","Wie alt bist du?","Ich bin zehn Jahre alt.","Das ist mein Hund.","Meine Schwester ist acht.","Wir sind eine Familie.","Ich wohne in Athen.","Wo wohnst du?","Das ist meine Oma.","Mein Opa ist sehr nett.","Ich habe zwei Katzen.","Hast du Geschwister?","Ja, ich habe eine Schwester.","Nein, ich habe keine Geschwister.","Meine Tante wohnt in Berlin.","Mein Onkel spielt Gitarre.","Das Haus ist groß.","Die Katze ist klein.","Ich komme aus Griechenland.","Woher kommst du?","Er ist mein Freund.","Sie ist meine Freundin.","Ich mag Pizza.","Magst du Eis?","Wir haben fünf Bücher.","Das ist ein Tisch.","Der Ball ist rot.","Die Tasche ist blau.","Ich spreche Griechisch und Deutsch.","Meine Familie ist groß.","Mein Bruder ist zwölf Jahre alt.","Wie viele Geschwister hast du?","Guten Morgen, Frau Müller.","Guten Tag, Herr Schmidt.","Danke, mir geht es gut.","Wie geht es dir?","Auf Wiedersehen!","Bis morgen, Tom.","Ich habe einen Hamster.","Das Mädchen heißt Lisa.","Der Junge ist sechs Jahre alt.","Das sind meine Eltern.","Meine Großeltern wohnen in Wien.","Ich bin neu in der Klasse.","Das ist mein Lehrer.","Ich lerne Deutsch."],"DB":["In meinem Zimmer gibt es ein Bett.|Es gibt ein Bett in meinem Zimmer.","Im Wohnzimmer gibt es einen Fernseher.|Es gibt einen Fernseher im Wohnzimmer.","Ich möchte ein neues Handy.","Möchtest du einen Apfel?","Mein Bruder hat blaue Augen.","Meine Schwester hat lange Haare.","Er trägt eine rote Jacke.","Sie trägt heute ein schönes Kleid.|Heute trägt sie ein schönes Kleid.","Ich habe einen Hund und zwei Katzen.","Mein Hund heißt Bello.","Wir feiern meinen Geburtstag im Garten.|Im Garten feiern wir meinen Geburtstag.","Ich schenke dir ein Buch.","Er gibt mir seine Tasche.","Ich muss heute Hausaufgaben machen.|Heute muss ich Hausaufgaben machen.","Du darfst nicht so laut sein.","Kannst du gut schwimmen?","Mein Lieblingsfach ist Mathe.","Ich spiele gern Fußball.","Am Samstag spiele ich Tennis.|Ich spiele am Samstag Tennis.","Mein Vater ist Lehrer.","Meine Mutter arbeitet im Krankenhaus.","Ich war gestern krank.|Gestern war ich krank.","Wir hatten viel Spaß.","Zum Frühstück esse ich Brot mit Marmelade.|Ich esse zum Frühstück Brot mit Marmelade.","Ich habe Pizza gegessen.","Wir haben Spaghetti gekocht.","Mach bitte das Fenster auf!","Öffne dein Buch!","Schalte den Computer ein!","Ich sehe gern Filme.","Das Handy liegt auf dem Tisch.","Die Lampe hängt über dem Bett.","Der Schrank steht neben der Tür.","Meine Katze schläft unter dem Sofa.","Ich habe heute keine Schule.|Heute habe ich keine Schule.","Mein Freund wohnt in einer großen Wohnung.","Hast du morgen Zeit?","Wir gehen am Sonntag ins Kino.|Am Sonntag gehen wir ins Kino.","Ich esse gern Schokolade.","Was möchtest du trinken?","Ich möchte ein Glas Wasser.","Der Lehrer erklärt die Aufgabe.","Mein Hamster frisst Karotten.","Sie hatte gestern Geburtstag.|Gestern hatte sie Geburtstag.","Er ist sehr sportlich.","Ich möchte Arzt werden.","Wir sind nach Hause gegangen.","Meine Schwester hat ein Eis gekauft.","Schreib mir bitte eine Nachricht!","Das Wetter ist heute schön.|Heute ist das Wetter schön."],"DA1":["Ich komme aus Griechenland und wohne in Athen.","Mein Name ist Maria und ich bin fünfzehn Jahre alt.","Am Wochenende besuche ich meine Großeltern.|Ich besuche meine Großeltern am Wochenende.","Um sieben Uhr stehe ich auf.|Ich stehe um sieben Uhr auf.","Ich frühstücke immer mit meiner Familie.","Wie spät ist es jetzt?","Es ist halb acht.","Wir haben heute Deutsch in der ersten Stunde.|In der ersten Stunde haben wir heute Deutsch.|Heute haben wir in der ersten Stunde Deutsch.","Mein Bruder spielt jeden Tag Fußball.|Jeden Tag spielt mein Bruder Fußball.","Kannst du mir bitte helfen?","Ich kann leider nicht kommen.","Hast du Lust, ins Kino zu gehen?","Das Buch kostet zehn Euro.","Wo ist die nächste Bushaltestelle?","Die Haltestelle ist neben dem Supermarkt.","Ich möchte einen Kaffee und ein Stück Kuchen.","Er isst kein Fleisch.","Sie trinkt gern Tee mit Zitrone.","Wir gehen im Sommer ans Meer.|Im Sommer gehen wir ans Meer.","Mein Freund hat einen neuen Computer.","Der Film beginnt um acht Uhr.","Ich lerne seit einem Jahr Deutsch.","Sie arbeitet als Ärztin im Krankenhaus.","Am Montag habe ich Mathe und Sport.|Ich habe am Montag Mathe und Sport.","Das Wetter ist heute kalt und windig.|Heute ist das Wetter kalt und windig.","Es regnet, und ich habe keinen Regenschirm.","Ich will mit dir ins Café gehen.","Wir müssen morgen früh aufstehen.|Morgen müssen wir früh aufstehen.","Darf ich das Fenster öffnen?","Du musst deine Hausaufgaben machen.","Sie hat gestern ihre Freundin besucht.|Gestern hat sie ihre Freundin besucht.","Wir sind letzte Woche nach Berlin gefahren.|Letzte Woche sind wir nach Berlin gefahren.","Ich habe gestern einen Brief geschrieben.|Gestern habe ich einen Brief geschrieben.","Das ist die Tasche von meiner Schwester.","Mein Lehrer wohnt in der Nähe der Schule.","Entschuldigung, wo ist die Toilette?","Ich suche einen roten Pullover.","Haben Sie auch eine größere Größe?","Der Zug nach München fährt um zehn Uhr ab.","Bitte bringen Sie mir die Speisekarte.","Ich nehme eine Pizza mit Pilzen.","Ich wohne in einem kleinen Haus mit Garten.","Meine Eltern arbeiten beide den ganzen Tag.","Wir spielen oft zusammen Karten.|Oft spielen wir zusammen Karten.","Sie liest gern spannende Bücher.","Hier ist mein Handy und dort ist deins.","Ich putze mir jeden Morgen die Zähne.|Jeden Morgen putze ich mir die Zähne.","Er fährt jeden Tag mit dem Fahrrad zur Schule.|Jeden Tag fährt er mit dem Fahrrad zur Schule.","Der Hund spielt im Garten mit dem Ball.","Wie komme ich zum Bahnhof?"],"DA2":["Ich bleibe zu Hause, weil ich krank bin.|Weil ich krank bin, bleibe ich zu Hause.","Er hat gesagt, dass er morgen kommt.","Wenn das Wetter schön ist, gehen wir spazieren.|Wir gehen spazieren, wenn das Wetter schön ist.","Gestern habe ich den ganzen Tag gelernt.|Ich habe gestern den ganzen Tag gelernt.","Sie ist mit dem Zug nach Hamburg gefahren.","Hast du schon deine Hausaufgaben gemacht?","Ich habe mich sehr über das Geschenk gefreut.","Er interessiert sich für moderne Kunst.","Kannst du mir sagen, wie spät es ist?","Ich weiß nicht, wo er wohnt.","Mein Bruder ist größer als ich.","Das ist der schönste Strand der Insel.","Ich würde gern im Ausland studieren.","Wir haben uns am Bahnhof getroffen.","Sie hat mir ein Buch zum Geburtstag geschenkt.","Ich habe meinem Freund einen Brief geschrieben.","Der Lehrer erklärt den Schülern die Grammatik.","Nach dem Essen trinken wir immer einen Kaffee.|Wir trinken nach dem Essen immer einen Kaffee.","Vor dem Haus steht ein großer Baum.","Ich fahre mit meiner Familie in den Urlaub.","Während der Ferien arbeitet sie in einem Café.|Sie arbeitet während der Ferien in einem Café.","Obwohl es regnet, gehen wir spazieren.|Wir gehen spazieren, obwohl es regnet.","Ich habe keine Zeit, denn ich muss lernen.","Er ist müde, aber er arbeitet weiter.","Wir möchten ein Zimmer mit Balkon reservieren.","Entschuldigung, können Sie mir den Weg zeigen?","Der Arzt hat mir Tabletten verschrieben.","Ich habe Kopfschmerzen und fühle mich schlecht.","Letzten Sommer waren wir in Italien.|Wir waren letzten Sommer in Italien.","Er konnte nicht kommen, weil er arbeiten musste.|Weil er arbeiten musste, konnte er nicht kommen.","Sie wollte Ärztin werden, aber sie wurde Lehrerin.","Ich habe keine Lust mehr, zu warten.","Das Konzert war besser, als ich gedacht habe.","Wann hast du Geburtstag?","Am zwanzigsten Mai habe ich Geburtstag.|Ich habe am zwanzigsten Mai Geburtstag.","Ich ziehe nächsten Monat in eine neue Wohnung um.|Nächsten Monat ziehe ich in eine neue Wohnung um.","Er räumt sein Zimmer nie auf.","Mach bitte das Licht aus, wenn du gehst.","Es gibt viele Möglichkeiten, Deutsch zu lernen.","Meine Schwester wohnt seit zwei Jahren in Wien.|Seit zwei Jahren wohnt meine Schwester in Wien.","Du solltest mehr Wasser trinken.","Darf man hier fotografieren?","Ich habe meinen Schlüssel verloren.","Wir haben lange auf den Bus gewartet.","Der Kuchen schmeckt mir sehr gut.","Sie hat sich die Haare schneiden lassen.","Ich bin in der Stadt aufgewachsen.","Hast du Lust, am Wochenende zu wandern?","Zuerst gehe ich einkaufen, dann koche ich.","Leider habe ich meine Brille vergessen.|Ich habe leider meine Brille vergessen."],"DB1":["Wenn ich mehr Geld hätte, würde ich eine Weltreise machen.|Ich würde eine Weltreise machen, wenn ich mehr Geld hätte.","Das Buch, das ich gerade lese, ist sehr spannend.","Der Mann, mit dem ich gesprochen habe, ist Arzt.","Die Hausaufgaben müssen bis morgen abgegeben werden.","Das Haus wurde vor zehn Jahren gebaut.|Vor zehn Jahren wurde das Haus gebaut.","Ich frage mich, ob er wirklich kommt.","Obwohl er müde war, hat er weitergearbeitet.|Er hat weitergearbeitet, obwohl er müde war.","Sobald ich zu Hause bin, rufe ich dich an.|Ich rufe dich an, sobald ich zu Hause bin.","Er tat so, als ob er nichts gehört hätte.","Ich hätte gern einen Tisch für vier Personen.","Es wäre schön, wenn wir uns bald wiedersehen würden.","Damit du es nicht vergisst, schreibe ich es auf.|Ich schreibe es auf, damit du es nicht vergisst.","Er freut sich darauf, seine Freunde zu treffen.","Ich ärgere mich darüber, dass der Zug Verspätung hat.","Je mehr man übt, desto besser wird man.","Sie hat ihren Job gekündigt, weil sie mehr verdienen wollte.|Weil sie mehr verdienen wollte, hat sie ihren Job gekündigt.","Nachdem wir gegessen hatten, gingen wir spazieren.|Wir gingen spazieren, nachdem wir gegessen hatten.","Bevor du gehst, musst du das Fenster schließen.|Du musst das Fenster schließen, bevor du gehst.","Trotz des schlechten Wetters sind wir gewandert.|Wir sind trotz des schlechten Wetters gewandert.","Wegen des Staus kam er zu spät zur Arbeit.|Er kam wegen des Staus zu spät zur Arbeit.","Man sollte regelmäßig Sport treiben.","Ich bin es gewohnt, früh aufzustehen.","Er hat versprochen, pünktlich zu sein.","Kannst du mir erklären, wie dieses Gerät funktioniert?","Die Stadt, in der ich geboren bin, ist sehr klein.","Sie arbeitet daran, ihr Deutsch zu verbessern.","Ich habe den Eindruck, dass er nicht zufrieden ist.","Während ich koche, hört er Musik.|Er hört Musik, während ich koche.","Das Konzert wurde wegen Regens abgesagt.|Wegen Regens wurde das Konzert abgesagt.","Ich würde dir raten, einen Arzt aufzusuchen.","Wenn er pünktlich gewesen wäre, hätten wir den Zug erreicht.|Wir hätten den Zug erreicht, wenn er pünktlich gewesen wäre.","Es ist wichtig, dass jeder seine Meinung sagen kann.","Er ist stolz darauf, dass er die Prüfung bestanden hat.","Anstatt fernzusehen, solltest du lernen.|Du solltest lernen, anstatt fernzusehen.","Meiner Meinung nach ist das keine gute Idee.|Das ist meiner Meinung nach keine gute Idee.","Ich habe mich entschieden, ins Ausland zu gehen.","Der Film, den wir gestern gesehen haben, war langweilig.","Sie hat so gut gesungen, dass alle begeistert waren.","Seitdem er in Berlin wohnt, spricht er besser Deutsch.|Er spricht besser Deutsch, seitdem er in Berlin wohnt.","Es kommt darauf an, wie das Wetter wird.","Wir haben uns lange über die Zukunft unterhalten.","Ich bedanke mich bei Ihnen für die Einladung.","Hättest du Lust, mit uns ins Theater zu gehen?","Ich werde mich um die Reservierung kümmern.","Die Preise sind in den letzten Jahren stark gestiegen.|In den letzten Jahren sind die Preise stark gestiegen.","Er hat mir geraten, mehr zu schlafen.","Bis wir ankommen, dauert es noch zwei Stunden.|Es dauert noch zwei Stunden, bis wir ankommen.","Im Vergleich zu früher ist das Leben teurer geworden.|Das Leben ist im Vergleich zu früher teurer geworden.","Ich interessiere mich besonders für Geschichte und Politik.","Wenn man ehrlich ist, hat man weniger Probleme.|Man hat weniger Probleme, wenn man ehrlich ist."],"DB2":["Es wird behauptet, dass die Preise weiter steigen werden.","Hätte ich das gewusst, wäre ich früher gekommen.|Ich wäre früher gekommen, hätte ich das gewusst.","Nicht nur das Wetter, sondern auch die Stimmung war schlecht.","Die Entscheidung muss gründlich überlegt werden.","Ungeachtet der Kritik hat er sein Vorhaben durchgesetzt.|Er hat sein Vorhaben ungeachtet der Kritik durchgesetzt.","Sie gilt als eine der besten Wissenschaftlerinnen des Landes.","Er verhielt sich, als wäre nichts geschehen.","Je länger ich darüber nachdenke, desto weniger verstehe ich es.","Angesichts der Lage ist größte Vorsicht geboten.|Größte Vorsicht ist angesichts der Lage geboten.","Das Projekt wurde trotz mehrerer Schwierigkeiten erfolgreich abgeschlossen.|Trotz mehrerer Schwierigkeiten wurde das Projekt erfolgreich abgeschlossen.","Ich bezweifle, dass diese Methode wirklich funktioniert.","Die Verhandlungen scheiterten an unterschiedlichen Vorstellungen.","Er bestand darauf, die Rechnung selbst zu bezahlen.","Sowohl die Lehrer als auch die Eltern waren einverstanden.","Man darf die Folgen dieser Entwicklung nicht unterschätzen.","Der Vorschlag stieß bei den Mitarbeitern auf große Zustimmung.","Abgesehen von einigen Fehlern war der Aufsatz hervorragend.|Der Aufsatz war abgesehen von einigen Fehlern hervorragend.","Es lässt sich nicht leugnen, dass das Problem ernst ist.","Die Studie kommt zu dem Ergebnis, dass Bewegung gesund ist.","Sofern keine Einwände bestehen, beginnen wir morgen.|Wir beginnen morgen, sofern keine Einwände bestehen.","Das Museum, dessen Eingang renoviert wird, bleibt geöffnet.","Er hat sich dazu bereit erklärt, uns zu unterstützen.","Anders als erwartet verlief die Veranstaltung ruhig.|Die Veranstaltung verlief anders als erwartet ruhig.","Aufgrund der hohen Nachfrage sind die Tickets ausverkauft.|Die Tickets sind aufgrund der hohen Nachfrage ausverkauft.","Sie wies darauf hin, dass die Frist bald abläuft.","Es ist an der Zeit, neue Wege zu gehen.","Die Zahl der Studierenden hat deutlich zugenommen.","Wer sich bewirbt, sollte gute Sprachkenntnisse nachweisen.","Er wurde dafür kritisiert, dass er zu spät reagiert hatte.","Im Hinblick auf die Kosten ist das Vorhaben kaum realisierbar.|Das Vorhaben ist im Hinblick auf die Kosten kaum realisierbar.","Die Diskussion drehte sich hauptsächlich um den Umweltschutz.","Nachdem alle Unterlagen geprüft worden waren, wurde der Antrag genehmigt.|Der Antrag wurde genehmigt, nachdem alle Unterlagen geprüft worden waren.","Es ist durchaus möglich, dass sich die Lage bald ändert.","Er hat sich mit der Situation abgefunden.","Hierbei handelt es sich um ein weit verbreitetes Missverständnis.","Je nach Wetterlage kann die Veranstaltung verschoben werden.|Die Veranstaltung kann je nach Wetterlage verschoben werden.","Die Regierung sieht sich mit wachsender Kritik konfrontiert.","Es wäre sinnvoll, die Ergebnisse noch einmal zu überprüfen.","Seit der Einführung des neuen Systems arbeiten wir effizienter.|Wir arbeiten seit der Einführung des neuen Systems effizienter.","Er konnte sich nicht daran erinnern, wo er den Schlüssel gelassen hatte.","Die Veröffentlichung des Berichts wurde auf nächste Woche verschoben.","Trotz aller Bemühungen blieb der Erfolg aus.","Sie legt großen Wert darauf, pünktlich zu sein.","Das Angebot gilt nur, solange der Vorrat reicht.","Man kann nicht alles auf einmal erreichen.","Die Teilnehmer wurden gebeten, ihre Handys auszuschalten.","Dank der guten Vorbereitung verlief die Präsentation reibungslos.|Die Präsentation verlief dank der guten Vorbereitung reibungslos.","Es bleibt abzuwarten, wie sich die Lage entwickelt.","Auf lange Sicht wird sich die Investition auszahlen.|Die Investition wird sich auf lange Sicht auszahlen.","Wie bereits erwähnt, liegt der Schwerpunkt auf der Grammatik.|Der Schwerpunkt liegt, wie bereits erwähnt, auf der Grammatik."]};
+const JUMBLE_BANK_FOR={EPJ:"EJAB"};
+const JUMBLE_SIZE=5, JUMBLE_BONUS_POINTS=0.5, JUMBLE_MIN_CORRECT=4;
+// ---- Extra sentences from the teacher's own JUMBLE tab (e.g. copied from the class books) ----
+// Tab layout (row 1 = headers):  A ClassCode | B Sentence | C OtherAcceptedOrders (optional, separated by |)
+// A row with the sentence  #ONLY  means: for that class use ONLY the tab's sentences, not the built-in ones.
+// Always add new sentences at the BOTTOM so students' places in the list don't move.
+const JUMBLE_GID=SKOOL_SETTINGS.JUMBLE_GID||"PASTE_JUMBLE_TAB_GID_HERE";
+const JUMBLE_SHEET_ENABLED=!!JUMBLE_GID && JUMBLE_GID.indexOf("PASTE_")!==0;
+let JUMBLE_EXTRA={}, JUMBLE_ONLY=new Set();
+function jumbleWordKey(sentence){ return jumbleTokens(sentence).map(t=>t.toLowerCase().replace(/,/g,'')).sort().join('\u0001'); }
+function parseJumbleSheet(values){
+  const extra={}, only=new Set(), seen={};
+  values.forEach(r=>{
+    const cls=String(r[0]==null?"":r[0]).trim().toUpperCase();
+    const sent=String(r[1]==null?"":r[1]).replace(/\|/g,' ').replace(/\s+/g,' ').trim();
+    if(!cls||!sent||!CLASS_LIST.includes(cls)) return;            // also skips the header row
+    if(sent.toUpperCase()==="#ONLY"){ only.add(cls); return; }
+    const n=jumbleTokens(sent).length;
+    if(n<3||n>25) return;                                          // too short/long to make a good puzzle
+    const key=cls+'|'+sent.toLowerCase(); if(seen[key]) return; seen[key]=1;
+    const alts=String(r[2]==null?"":r[2]).split('|').map(a=>a.replace(/\s+/g,' ').trim()).filter(a=>a && jumbleWordKey(a)===jumbleWordKey(sent));   // an alternative must use exactly the same words
+    (extra[cls]=extra[cls]||[]).push([sent].concat(alts).join('|'));
+  });
+  return {extra,only};
+}
+function loadJumbleSheet(){
+  if(!JUMBLE_SHEET_ENABLED) return Promise.resolve({extra:{},only:new Set()});
+  return loadGviz(JUMBLE_GID,true).then(gvizToValues).then(parseJumbleSheet).catch(()=>({extra:{},only:new Set()}));
+}
+function jumbleBankFor(c){
+  const built=JUMBLE_BANKS[JUMBLE_BANK_FOR[c]||c]||JUMBLE_BANKS.EA1;
+  const extra=JUMBLE_EXTRA[c]||[];
+  if(JUMBLE_ONLY.has(c) && extra.length>=JUMBLE_SIZE) return extra;   // the teacher chose "#ONLY" for this class
+  return built.concat(extra);
+}
+function jumbleTokens(sentence){
+  const parts=sentence.trim().split(/\s+/), out=[];
+  parts.forEach((p,i)=>{
+    const m=p.match(/^(.*?)([.?!]+)$/);
+    if(m && i===parts.length-1){ if(m[1]) out.push(m[1]); out.push(m[2]); } else out.push(p);
+  });
+  return out;
+}
+function jumbleJoin(tokens){ return tokens.join(' ').replace(/\s+([.?!]+)/g,'$1'); }
+// Capital letters and commas don't matter when checking -- only the word order.
+function jumbleNorm(s){ return s.toLowerCase().replace(/,/g,'').replace(/\s+/g,' ').replace(/\s+([.?!]+)/g,'$1').trim(); }
+function jumbleKey(k,s){ return 'sk_'+k+'_'+s.stuCode; }
+function jumbleRoundsDone(s){ return parseInt(localStorage.getItem(jumbleKey('jrounds',s))||'0',10)||0; }
+// A different, fixed (per student) shuffled order for each repeat pass through the list.
+function jumbleSeededOrder(n,seed){
+  let h=2166136261; for(let k=0;k<seed.length;k++){ h^=seed.charCodeAt(k); h=Math.imul(h,16777619); }
+  let a=h>>>0;
+  const rnd=()=>{ a=(a+0x6D2B79F5)>>>0; let t=a; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; };
+  const arr=Array.from({length:n},(_,i)=>i);
+  for(let i=n-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; }
+  return arr;
+}
+function jumbleOrder(s,len,pass){ return pass===0?Array.from({length:len},(_,i)=>i):jumbleSeededOrder(len,s.stuCode+'|'+pass+'|'+len); }
+// Pass 1 = the list in book order (easy -> harder). After the whole list has been used, the NEXT pass
+// uses the same sentences in a new shuffled order, so the groups of 5 are different the second time.
+function jumbleToday(s){
+  const bank=jumbleBankFor(s.classCode), len=bank.length, blocks=Math.ceil(len/JUMBLE_SIZE);
+  const r=jumbleRoundsDone(s), pass=Math.floor(r/blocks), b=r%blocks;
+  const idxs=jumbleOrder(s,len,pass).slice(b*JUMBLE_SIZE,b*JUMBLE_SIZE+JUMBLE_SIZE);
+  if(idxs.length<JUMBLE_SIZE){                                        // short last block: top it up with sentences from the next pass
+    for(const k of jumbleOrder(s,len,pass+1)){ if(idxs.length>=JUMBLE_SIZE) break; if(!idxs.includes(k)) idxs.push(k); }
+  }
+  return idxs.map(k=>bank[k].split('|'));   // each = [main sentence, ...other accepted orders]
+}
+function jumblePlayedToday(s){ return (localStorage.getItem(jumbleKey('jdate',s))||"")===dayStamp(new Date()); }
+function jumbleLoadProg(s){
+  try{ const p=JSON.parse(localStorage.getItem(jumbleKey('jprog',s))||'null');
+    if(p && p.date===dayStamp(new Date()) && Array.isArray(p.results)) return p; }catch(e){}
+  return {date:dayStamp(new Date()),results:[]};
+}
+
+function renderJumbleMenu(s){
+  const body=document.getElementById('jumbleBody'); body.innerHTML="";
+  body.appendChild(pgEl('div','pgTitle','\ud83e\udde9 Word Jumble'));
+  body.appendChild(pgEl('div','pgSub','Put the jumbled words in the right order!'));
+  const box=pgEl('div','pgInfo');
+  if(jumblePlayedToday(s)){
+    box.appendChild(pgEl('div','pgInfoMain','\u2705 You have done today\u2019s Word Jumble!'));
+    const sc=(localStorage.getItem(jumbleKey('jscore',s))||"").split('|');
+    if(sc[0]===dayStamp(new Date()) && sc[1]!=null && sc[1]!=="") box.appendChild(pgEl('div','pgInfoStatus','Your score today: '+sc[1]+' / '+JUMBLE_SIZE));
+    box.appendChild(pgEl('div','pgInfoSub','\ud83c\udf05 Come back tomorrow for a new round!'));
+    body.appendChild(box); return;
+  }
+  box.appendChild(pgEl('div','pgInfoMain','\ud83e\udde9 5 sentences a day \u2014 drag the words (or tap them), then press Check.'));
+  if(REWARDS_ENABLED){ const b=pgEl('div','pgInfoStatus',null); b.appendChild(document.createTextNode('\u2b50 ')); b.appendChild(pgEl('b',null,'4/5 or 5/5 correct = +0.5 points!')); box.appendChild(b); }
+  box.appendChild(pgEl('div','pgInfoSub','\ud83d\udd25 Counts for your streak \u00b7 \ud83c\udf81 and can win you a sticker \u00b7 one round a day'));
+  body.appendChild(box);
+  const done=jumbleLoadProg(s).results.length;
+  const go=pgEl('button','pgBtn green',done>0?`\u25b6\ufe0f Continue (sentence ${done+1} of ${JUMBLE_SIZE})`:'\u25b6\ufe0f Start today\u2019s round');
+  go.type='button'; go.onclick=()=>startJumble(s); body.appendChild(go);
+}
+
+function startJumble(s){
+  const sentences=jumbleToday(s);
+  const prog=jumbleLoadProg(s);
+  const results=prog.results;
+  let idx=results.length;
+  const body=document.getElementById('jumbleBody');
+
+  function showSentence(){
+    if(idx>=sentences.length){ finish(); return; }
+    body.innerHTML="";
+    const answers=sentences[idx], main=answers[0];
+    const base=jumbleTokens(main).map((t,i)=>({id:i,text:t,punct:/^[.?!]+$/.test(t)}));
+    let order=shuffled(base), tries=0;
+    while(base.length>1 && order.every((t,i)=>t.id===base[i].id) && tries++<20) order=shuffled(base);
+    let bankTiles=order.slice(), lineTiles=[], locked=false;
+
+    const prog=pgEl('div','pgProg',null);
+    prog.appendChild(pgEl('span',null,'\ud83e\udde9 Word Jumble'));
+    prog.appendChild(pgEl('span',null,`Sentence ${idx+1} / ${sentences.length}`));
+    body.appendChild(prog);
+    const bar=pgEl('div','pgBar'); const fill=pgEl('div','pgBarFill'); fill.style.width=Math.round(idx/sentences.length*100)+'%'; bar.appendChild(fill); body.appendChild(bar);
+    body.appendChild(pgEl('div','jzHint','Drag the words down into the line (or tap them) \u2b07\ufe0f'));
+    const lineEl=pgEl('div','jzLine empty'); lineEl.dataset.ph='Build your sentence here';
+    const bankEl=pgEl('div','jzBank');
+    body.appendChild(bankEl); body.appendChild(lineEl);          // words on top -> drag them DOWN into the line
+    const row=pgEl('div','jzBtnRow');
+    const resetBtn=pgEl('button','pgBtn alt','\u21ba Start again'); resetBtn.type='button';
+    const checkBtn=pgEl('button','pgBtn green','\u2714 Check'); checkBtn.type='button';
+    row.appendChild(resetBtn); row.appendChild(checkBtn); body.appendChild(row);
+    const fb=pgEl('div','pgFb'); fb.style.display='none'; body.appendChild(fb);
+    const nextBtn=pgEl('button','pgBtn',idx+1<sentences.length?'Next sentence \u2192':'Finish \u2713'); nextBtn.type='button'; nextBtn.style.display='none'; nextBtn.style.marginTop='10px'; body.appendChild(nextBtn);
+
+    function render(){
+      lineEl.innerHTML=""; bankEl.innerHTML="";
+      lineTiles.forEach(t=>lineEl.appendChild(mkTile(t)));
+      bankTiles.forEach(t=>bankEl.appendChild(mkTile(t)));
+      lineEl.classList.toggle('empty',lineTiles.length===0);
+      checkBtn.disabled=locked||bankTiles.length>0;
+      resetBtn.disabled=locked||lineTiles.length===0;
+      checkBtn.style.opacity=checkBtn.disabled?'.45':'1'; resetBtn.style.opacity=resetBtn.disabled?'.45':'1';
+    }
+    function mkTile(t){
+      const el=pgEl('div','jzTile'+(t.punct?' punct':''),t.text);
+      el.addEventListener('pointerdown',e=>startDrag(e,el,t));
+      return el;
+    }
+    function moveTile(tile,to,at){
+      lineTiles=lineTiles.filter(t=>t!==tile); bankTiles=bankTiles.filter(t=>t!==tile);
+      const arr=to==='line'?lineTiles:bankTiles;
+      if(at==null||at>arr.length) at=arr.length;
+      arr.splice(at,0,tile); render();
+    }
+    function locate(x,y){
+      const pad=14;
+      for(const [name,el] of [['line',lineEl],['bank',bankEl]]){
+        const r=el.getBoundingClientRect();
+        if(x>=r.left-pad && x<=r.right+pad && y>=r.top-pad && y<=r.bottom+pad) return name;
+      }
+      return null;
+    }
+    function insertIndex(container,x,y,skipEl){
+      const kids=[...container.children].filter(c=>c!==skipEl && c.classList.contains('jzTile'));
+      for(let i=0;i<kids.length;i++){
+        const r=kids[i].getBoundingClientRect();
+        if(y<r.top) return i;                              // pointer is on a row above this tile
+        if(y<=r.bottom && x<r.left+r.width/2) return i;   // same row, left of the tile's middle
+      }
+      return kids.length;
+    }
+    function startDrag(e,el,tile){
+      if(locked) return;
+      e.preventDefault();
+      const sx=e.clientX, sy=e.clientY, r0=el.getBoundingClientRect(), ox=sx-r0.left, oy=sy-r0.top;
+      let ghost=null, dragging=false;
+      const onMove=ev=>{
+        if(!dragging && Math.hypot(ev.clientX-sx,ev.clientY-sy)>7){
+          dragging=true; ghost=el.cloneNode(true); ghost.classList.add('jzGhost'); ghost.style.width=r0.width+'px';
+          document.body.appendChild(ghost); el.classList.add('dragging');
+        }
+        if(dragging){
+          ghost.style.left=(ev.clientX-ox)+'px'; ghost.style.top=(ev.clientY-oy)+'px';
+          const w=locate(ev.clientX,ev.clientY);
+          lineEl.classList.toggle('over',w==='line'); bankEl.classList.toggle('over',w==='bank');
+        }
+      };
+      const end=ev=>{
+        window.removeEventListener('pointermove',onMove); window.removeEventListener('pointerup',end); window.removeEventListener('pointercancel',end);
+        lineEl.classList.remove('over'); bankEl.classList.remove('over'); if(ghost) ghost.remove();
+        if(!dragging){ moveTile(tile, lineTiles.includes(tile)?'bank':'line', null); return; }   // a simple tap: send it to the other box
+        const w=ev.type==='pointercancel'?null:locate(ev.clientX,ev.clientY);
+        if(!w){ render(); return; }
+        moveTile(tile,w,insertIndex(w==='line'?lineEl:bankEl,ev.clientX,ev.clientY,el));
+      };
+      window.addEventListener('pointermove',onMove); window.addEventListener('pointerup',end); window.addEventListener('pointercancel',end);
+    }
+
+    resetBtn.onclick=()=>{ if(locked) return; bankTiles=bankTiles.concat(lineTiles); lineTiles=[]; render(); };
+    checkBtn.onclick=()=>{
+      if(locked || bankTiles.length) return;
+      locked=true; body.classList.add('jzLocked');
+      const given=jumbleJoin(lineTiles.map(t=>t.text));
+      const ok=answers.some(a=>jumbleNorm(a)===jumbleNorm(given));
+      lineEl.classList.add(ok?'ok':'bad');
+      if(ok){ AudioEngine.playCorrect(); FX.confetti(lineEl,30); fb.className='pgFb ok'; fb.textContent='\u2713 Correct!'; }
+      else{ AudioEngine.playWrong(); fb.className='pgFb err'; fb.textContent='\u2717 Not quite. The correct sentence is: \u201c'+main+'\u201d'; }
+      fb.style.display='block'; nextBtn.style.display='block';
+      results.push({given,ok,correct:main});
+      localStorage.setItem(jumbleKey('jprog',s),JSON.stringify({date:dayStamp(new Date()),results}));   // so leaving halfway can't be used to peek and retry
+      render();
+    };
+    nextBtn.onclick=()=>{ idx++; body.classList.remove('jzLocked'); showSentence(); };
+    render();
+  }
+
+  function finish(){
+    const score=results.filter(r=>r.ok).length, total=sentences.length, today=dayStamp(new Date());
+    localStorage.setItem(jumbleKey('jdate',s),today);
+    localStorage.setItem(jumbleKey('jrounds',s),String(jumbleRoundsDone(s)+1));
+    localStorage.setItem(jumbleKey('jscore',s),today+'|'+score);
+    localStorage.removeItem(jumbleKey('jprog',s));
+    body.innerHTML=""; body.classList.remove('jzLocked');
+    body.appendChild(pgEl('div','pgTitle','\ud83e\udde9 Word Jumble'));
+    body.appendChild(pgEl('div','pgScore',`${score} / ${total}`));
+    const msg=score===total?"Perfect! You're a word wizard! \ud83e\uddd9":score>=4?"Excellent work! \ud83c\udf89":score>=3?"Good job \u2014 keep it up! \ud83d\udcaa":"Nice try \u2014 practice makes perfect! \ud83c\udf31";
+    body.appendChild(pgEl('div','pgMsg',msg));
+    if(score>=4){ FX.confetti(body,80); AudioEngine.playLevelUp(); }
+    registerStreakDay(s);
+    const status=finishJumbleRewards(s,score,total);
+    if(status==='awarded') body.appendChild(pgEl('div','pgReward','\u2b50 +'+JUMBLE_BONUS_POINTS+' points \u2014 4/5 or more correct!'));
+    else if(status==='low') body.appendChild(pgEl('div','pgNote','Get 4/5 or more tomorrow to earn +0.5 points!'));
+    const stk=score>=3?maybeAwardSticker(s.stuCode):null;
+    if(stk){
+      const r=pgEl('div','mysteryReveal',null); r.appendChild(document.createTextNode('\ud83c\udf81 Surprise! You found a new sticker: '));
+      r.appendChild(pgEl('span','stickerPop',stk)); r.appendChild(document.createElement('br')); r.appendChild(document.createTextNode('Check your Sticker Album!'));
+      body.appendChild(r); FX.confetti(r,50);
+    }
+    const reviewBox=pgEl('div'); body.appendChild(reviewBox);
+    attachReviewUI(reviewBox,results.map((r,i)=>({q:'Sentence '+(i+1),picked:r.given,correct:r.ok,correctText:r.correct,explain:""})));
+    body.appendChild(pgEl('div','pgInfo',null));
+    body.lastChild.appendChild(pgEl('div','pgInfoMain','\ud83c\udf05 Come back tomorrow for a new round!'));
+    body.lastChild.style.marginTop='10px';
+  }
+  showSentence();
+}
+// +0.5 points when 4/5 or 5/5 are right. The Apps Script is the judge (once a day, any device).
+function finishJumbleRewards(s,score,total){
+  if(!REWARDS_ENABLED) return 'off';
+  const eligible=score>=JUMBLE_MIN_CORRECT;
+  if(eligible){
+    s.bonus=(s.bonus||0)+JUMBLE_BONUS_POINTS;
+    FX.toast('\u2b50 +'+JUMBLE_BONUS_POINTS+' points for the Word Jumble!','levelup');
+    renderTrail(s,true);
+  }
+  postToBackendJSON({action:"jumbleDone",stuCode:s.stuCode,nickname:s.nickname||s.fullName,classCode:s.classCode,today:dayStamp(new Date()),score,total,claimId:newClaimId()}).then(res=>{
+    if(res.ok===false){
+      if(eligible){ s.bonus=(s.bonus||0)-JUMBLE_BONUS_POINTS; FX.toast("Couldn't save the bonus \u2014 please try again later","pb"); }
+    }else if(!res.unknown){
+      if(typeof res.bonus==='number') s.bonus=res.bonus;
+      else if(eligible && res.awarded===false){
+        s.bonus=(s.bonus||0)-JUMBLE_BONUS_POINTS;
+        const line=document.querySelector('#jumbleBody .pgReward');
+        if(line){ line.className='pgNote'; line.textContent='(The bonus was already used today.)'; }
+      }
+    }
+    renderTrail(s,true);
+  });
+  return eligible?'awarded':'low';
+}
+
 /* ---- Mascot speech bubble reactions ---- */
 const MASCOT_CORRECT=['Nice one! \ud83c\udf1f','You got it! \ud83d\ude80','Brilliant! \ud83c\udf89','Yes! \ud83d\udcaa','Smart move! \ud83e\udde0'];
 const MASCOT_WRONG=['So close! \ud83d\udcaa','Nice try! \ud83d\ude0a','Next one\u2019s yours! \u2728','Keep going! \ud83c\udf31'];
@@ -1416,7 +1716,7 @@ const CHALLENGES_GID="1640397484";
 // follow the student to any device and the teacher can edit/erase rubies by hand).
 // Created by running setupRewardsSheet() in the Apps Script -- see the setup note.
 // Until this is set, the streak box still counts but the claim buttons stay off.
-const REWARDS_GID="1605775108";
+const REWARDS_GID=SKOOL_SETTINGS.REWARDS_GID||"PASTE_REWARDS_TAB_GID_HERE";
 const REWARDS_ENABLED=!!REWARDS_GID && REWARDS_GID.indexOf("PASTE_")!==0;
 let REWARDS={};   // stuCode -> {streak,date,rubies}
 const CHECKPOINTS=Array.from({length:21},(_,i)=>({t:i*10,label:i===0?"Start ❄️":i===20?"SEA! 🌊 200":`Level ${i}`}));
@@ -1496,14 +1796,14 @@ function parseChallenges(values){
   }
   return rows;
 }
-// REWARDS tab layout: A=StuCode B=Nickname C=Class D=Streak E=LastStreakDate F=Rubies G=RubiesEarnedTotal H=LastPracticeDate
+// REWARDS tab layout: A=StuCode B=Nickname C=Class D=Streak E=LastStreakDate F=Rubies G=RubiesEarnedTotal H=LastPracticeDate I=LastJumbleDate J=JumbleRounds
 function parseRewards(values){
   const map={};
   values.forEach(r=>{
     const row=r.map(v=>String(v==null?"":v).trim());
     const code=row[0];
     if(!code||code.toLowerCase()==="stucode") return;
-    map[code]={streak:parseInt(row[3],10)||0,date:row[4]||"",rubies:parseInt(row[5],10)||0,practiceDate:row[7]||""};
+    map[code]={streak:parseInt(row[3],10)||0,date:row[4]||"",rubies:parseInt(row[5],10)||0,practiceDate:row[7]||"",jumbleDate:row[8]||"",jumbleRounds:parseInt(row[9],10)||0};
   });
   return map;
 }
@@ -1528,6 +1828,8 @@ function syncRewardsCache(st){
   saveStreak(st.stuCode,{count:count,lastDate:r.date||null,best:Math.max(cur.best||0,count)});
   localStorage.setItem(rubyKey(st.stuCode),String(r.rubies));
   localStorage.setItem('sk_pdate_'+st.stuCode,r.practiceDate||"");
+  localStorage.setItem('sk_jdate_'+st.stuCode,r.jumbleDate||"");
+  localStorage.setItem('sk_jrounds_'+st.stuCode,String(r.jumbleRounds||0));
 }
 
 function loadChallenges(){
@@ -5053,6 +5355,7 @@ async function init(){
   renderHallOfFame();
   CHALLENGES=await loadChallenges();
   REWARDS=await loadRewards();
+  { const jx=await loadJumbleSheet(); JUMBLE_EXTRA=jx.extra; JUMBLE_ONLY=jx.only; }
 }
 document.getElementById('loginBtn').onclick=()=>{
   const sel=document.getElementById('classSel'); const cls=sel.value; const pwd=document.getElementById('pwd').value.trim().toUpperCase();
@@ -5099,6 +5402,10 @@ document.getElementById('menuClassBtn').onclick=()=>openModal('modalClass');
 document.getElementById('menuContestBtn').onclick=()=>openModal('modalContest');
 document.getElementById('menuExtraBtn').onclick=()=>openModal('modalExtra');
 document.getElementById('menuClassHofBtn').onclick=()=>openModal('modalClassHof');
+document.getElementById('menuJumbleBtn').onclick=()=>{
+  if(CURRENT_STUDENT) renderJumbleMenu(CURRENT_STUDENT);
+  openModal('modalJumble');
+};
 document.getElementById('menuPracticeBtn').onclick=()=>{
   if(CURRENT_STUDENT) renderPracticeMenu(CURRENT_STUDENT);
   openModal('modalPractice');
