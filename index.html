@@ -157,6 +157,8 @@ select,input{width:100%;padding:14px;border-radius:14px;border:3px solid var(--i
 .wpOverlay{display:none;position:fixed;inset:0;z-index:10400;background:rgba(16,24,40,.6);align-items:center;justify-content:center;padding:16px}
 .wpOverlay.show{display:flex}
 .wpCard{position:relative;width:min(92vw,370px);border:4px solid var(--ink);border-radius:26px;background:#fff;box-shadow:8px 8px 0 var(--ink);overflow:hidden;animation:wpPop .5s cubic-bezier(.2,1.5,.4,1);color:var(--ink)}
+@keyframes wpNudge{0%,100%{box-shadow:2px 2px 0 var(--ink),0 0 0 0 rgba(255,200,0,0)}50%{box-shadow:2px 2px 0 var(--ink),0 0 0 7px rgba(255,200,0,.65)}}
+.wpHint{font-weight:800;font-size:13px;opacity:.75;margin-top:4px}
 @keyframes wpPop{0%{transform:scale(.4) rotate(-4deg);opacity:0}100%{transform:none;opacity:1}}
 .wpBand{position:relative;height:104px;display:flex;align-items:center;justify-content:center;border-bottom:4px solid var(--ink);overflow:hidden}
 .wpEmoji{font-size:58px;line-height:1;animation:wpBounce 1.1s ease-in-out infinite;filter:drop-shadow(0 3px 0 rgba(0,0,0,.25))}
@@ -174,12 +176,12 @@ select,input{width:100%;padding:14px;border-radius:14px;border:3px solid var(--i
 .wpGo{border:3px solid var(--ink);border-radius:14px;padding:12px 10px;font-weight:900;font-size:15px;font-family:inherit;cursor:pointer;color:#fff;box-shadow:3px 3px 0 var(--ink)}
 .wpGo:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
 .wpLater{border:0;background:none;font-weight:800;font-size:13px;font-family:inherit;opacity:.65;cursor:pointer;padding:4px;color:var(--ink)}
-.wpClose{position:absolute;top:10px;right:10px;z-index:3;width:36px;height:36px;border-radius:50%;border:3px solid var(--ink);background:#fff;font-size:16px;font-weight:900;line-height:1;cursor:pointer;box-shadow:2px 2px 0 var(--ink);display:flex;align-items:center;justify-content:center;color:var(--ink)}
+.wpClose{position:absolute;top:10px;right:10px;z-index:3;width:42px;height:42px;border-radius:50%;border:3px solid var(--ink);background:#fff;animation:wpNudge 1.6s ease-in-out infinite;font-size:19px;font-weight:900;line-height:1;cursor:pointer;box-shadow:2px 2px 0 var(--ink);display:flex;align-items:center;justify-content:center;color:var(--ink)}
 .wp-contest .wpBand{background:linear-gradient(135deg,#7C3AED,#FF4FA3)}   .wp-contest .wpGo{background:#7C3AED}
 .wp-bonus   .wpBand{background:linear-gradient(135deg,#FFC800,#FF8A00)}   .wp-bonus   .wpGo{background:#E87500}
 .wp-brain   .wpBand{background:linear-gradient(135deg,#2ECC71,#14A3A3)}   .wp-brain   .wpGo{background:#14A36B}
 .wp-jumble  .wpBand{background:linear-gradient(135deg,#1E90FF,#6FD6FF)}   .wp-jumble  .wpGo{background:#1E7BE6}
-@media (prefers-reduced-motion:reduce){.wpEmoji,.wpSpark{animation:none}.wpCard{animation:none}}
+@media (prefers-reduced-motion:reduce){.wpEmoji,.wpSpark,.wpClose{animation:none}.wpCard{animation:none}}
 /* Avatars */
 .mascotAvatar{cursor:pointer}
 .mascotAvatar::after{content:"✎";position:absolute;right:-4px;bottom:-4px;width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid var(--ink);font-size:12px;display:flex;align-items:center;justify-content:center}
@@ -668,11 +670,86 @@ const SKOOL_SETTINGS=(typeof window!=="undefined"&&window.SKOOL_SETTINGS)||{};
    stingers (bright ascending chime vs low descending buzz) for correct
    and wrong answers are still synthesized live with the Web Audio API --
    no files needed for those, and they're unaffected by this change. */
+/* ============ GAME MUSIC ============
+   Each game has its OWN little tune, played live by the browser (nothing to upload). While a game is
+   being played the main background track fades out; when the game ends or its window is closed the
+   main track fades back in. The mute button silences everything. */
+const midiHz=m=>440*Math.pow(2,(m-69)/12);
+function gmNote(c,dest,midi,t,dur,type,vol){
+  const o=c.createOscillator(), g=c.createGain();
+  o.type=type; o.frequency.value=midiHz(midi);
+  g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(vol,t+0.006); g.gain.exponentialRampToValueAtTime(0.0001,t+Math.max(0.03,dur));
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+Math.max(0.03,dur)+0.05);
+}
+function gmNoiseBuf(c){
+  if(!c._gmNoise){ const len=Math.floor(c.sampleRate*0.5), b=c.createBuffer(1,len,c.sampleRate), d=b.getChannelData(0); for(let i=0;i<len;i++) d[i]=Math.random()*2-1; c._gmNoise=b; }
+  return c._gmNoise;
+}
+function gmNoiseHit(c,dest,t,vol,dur,ftype,freq){
+  const s=c.createBufferSource(); s.buffer=gmNoiseBuf(c);
+  const f=c.createBiquadFilter(); f.type=ftype; f.frequency.value=freq;
+  const g=c.createGain(); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  s.connect(f); f.connect(g); g.connect(dest); s.start(t); s.stop(t+dur+0.02);
+}
+const gmHat=(c,d,t,v,dur)=>gmNoiseHit(c,d,t,v,dur||0.05,"highpass",7000);
+const gmSnare=(c,d,t,v)=>{ gmNoiseHit(c,d,t,v,0.14,"bandpass",1800); gmNote(c,d,55,t,0.1,"triangle",v*0.8); };
+function gmKick(c,d,t,v){
+  const o=c.createOscillator(), g=c.createGain();
+  o.type="sine"; o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(45,t+0.12);
+  g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.2);
+  o.connect(g); g.connect(d); o.start(t); o.stop(t+0.22);
+}
+// Each song is 64 sixteenth-note steps (4 bars) that loop. step(c,dest,i,t,sp): i = step number, t = time, sp = seconds per step.
+const GAME_SONGS={
+  // Contest: driving but friendly -- bass, bright arpeggio, kick/snare/hats (steady tempo, never speeds up)
+  contest:{bpm:122,step(c,d,i,t,sp){
+    const bar=Math.floor(i/16)%4, s=i%16;
+    const roots=[36,33,29,31], chords=[[60,64,67,72],[57,60,64,69],[53,57,60,65],[55,59,62,67]];
+    if(s%2===0){ const off=[0,0,12,0,0,12,0,7][s/2]; gmNote(c,d,roots[bar]+off,t,sp*1.8,"triangle",0.34); }
+    gmNote(c,d,chords[bar][[0,1,2,3,2,1,2,3,0,1,2,3,2,1,3,2][s]],t,sp*1.3,"square",0.06);
+    if(s===0||s===8||s===10) gmKick(c,d,t,0.55);
+    if(s===4||s===12) gmSnare(c,d,t,0.22);
+    if(s%2===0) gmHat(c,d,t,s%4===2?0.09:0.05);
+  }},
+  // Brain Gym: calm and focused -- soft pads, slow bell arpeggio, no drums
+  brain:{bpm:84,step(c,d,i,t,sp){
+    const bar=Math.floor(i/16)%4, s=i%16;
+    const chords=[[60,64,67,71],[57,60,64,67],[53,57,60,64],[55,59,62,67]];
+    if(s===0){ chords[bar].forEach((m,k)=>gmNote(c,d,m-12,t+k*0.012,sp*15,"sine",0.06)); gmNote(c,d,chords[bar][0]-24,t,sp*8,"sine",0.18); }
+    if(s===8) gmNote(c,d,chords[bar][0]-24,t,sp*7,"sine",0.13);
+    if(s%2===0){ const k=[0,2,3,1,2,3,1,2][s/2]; gmNote(c,d,chords[bar][k]+12,t,sp*3.5,"sine",0.085); }
+    if(s%4===2) gmHat(c,d,t,0.028,0.04);
+  }},
+  // Word Jumble: playful and bouncy -- staccato tune, oom-pah bass, light shaker
+  jumble:{bpm:112,step(c,d,i,t,sp){
+    const bar=Math.floor(i/16)%4, s=i%16;
+    const mel=[[72,76,79,76,72,76,79,84],[77,81,84,81,77,81,84,81],[79,83,86,83,79,83,79,74],[72,67,72,76,79,76,72,0]];
+    const roots=[48,53,55,48];
+    if(s%2===0){ const n=mel[bar][s/2]; if(n) gmNote(c,d,n,t,sp*1.7,"triangle",0.16); }
+    if(s===0) gmNote(c,d,roots[bar]-12,t,sp*3,"triangle",0.30);
+    if(s===8) gmNote(c,d,roots[bar]-5,t,sp*3,"triangle",0.26);
+    if(s===4||s===12){ gmNote(c,d,roots[bar]+4,t,sp*1.5,"sine",0.07); gmSnare(c,d,t,0.10); }
+    if(s===0||s===8) gmKick(c,d,t,0.32);
+    gmHat(c,d,t,s%2===0?0.04:0.025,0.035);
+  }},
+  // Daily bonus question: curious and sparkly -- music-box notes over a soft bass
+  bonus:{bpm:100,step(c,d,i,t,sp){
+    const bar=Math.floor(i/16)%4, s=i%16;
+    const seq=[84,88,91,88,86,84,81,84, 79,83,86,83,81,79,76,79, 77,81,84,81,79,77,74,77, 79,83,86,91,88,86,83,79];
+    const roots=[36,41,43,36];
+    if(i%2===0){ const n=seq[(i/2)%32]; gmNote(c,d,n,t,sp*3.2,"sine",0.10); gmNote(c,d,n+12,t,sp*2,"triangle",0.025); }
+    if(s===0) gmNote(c,d,roots[bar],t,sp*14,"sine",0.2);
+    if(s===8) gmNote(c,d,roots[bar]+7,t,sp*6,"sine",0.12);
+    if(s===4||s===12) gmHat(c,d,t,0.022,0.04);
+  }}
+};
+const GAME_MUSIC_LEVEL=0.3, BG_MUSIC_VOLUME=0.35;
+
 const AudioEngine=(()=>{
   let ctx=null, masterGain=null;
   let muted=(localStorage.getItem('sk_muted')==='1');
   const bgAudio=document.getElementById('bgMusic');
-  if(bgAudio){ bgAudio.volume=0.35; bgAudio.muted=muted; }
+  if(bgAudio){ bgAudio.volume=BG_MUSIC_VOLUME; bgAudio.muted=muted; }
 
   function ensureCtx(){
     if(!ctx){
@@ -702,17 +779,51 @@ const AudioEngine=(()=>{
     osc.start(t0); osc.stop(t0+duration+0.03);
   }
 
-  // fast=true (during a contest round) plays the same track a little
-  // quicker/higher for a livelier feel, instead of needing a second
-  // music file -- playbackRate resets back to normal afterwards.
-  function startMusic(fast){
+  // The main background track always plays at its normal speed. (It no longer speeds up in contests:
+  // each game has its own tune instead.) While a game's tune is playing, the main track stays quiet.
+  function startMusic(){
     if(!bgAudio) return;
-    bgAudio.playbackRate=fast?1.15:1.0;
-    if(bgAudio.paused) bgAudio.play().catch(()=>{}); // browsers can still
-                                                       // reject this before
-                                                       // any user gesture
+    bgAudio.playbackRate=1.0;
+    if(gameKind||resumePending) return;                // a game is being played -> the main track comes back afterwards
+    if(bgAudio.paused) bgAudio.play().catch(()=>{});  // browsers can still reject this before any user gesture
   }
   function stopMusic(){ if(bgAudio){ bgAudio.pause(); } }
+
+  // ---- each game's own tune ----
+  let musicGain=null, gameTimer=null, gameKind=null, gameStep=0, gameNext=0;
+  let bgWasPlaying=false, bgFadeTimer=null, resumeTO=null, resumePending=false, stepsScheduled=0;
+  function fadeBg(to,ms,done){
+    if(!bgAudio) return;
+    clearInterval(bgFadeTimer);
+    const from=bgAudio.volume, n=Math.max(1,Math.round(ms/40)); let k=0;
+    bgFadeTimer=setInterval(()=>{ k++; bgAudio.volume=Math.max(0,Math.min(1,from+(to-from)*k/n)); if(k>=n){ clearInterval(bgFadeTimer); bgFadeTimer=null; if(done) done(); } },40);
+  }
+  function scheduleGame(){
+    const song=GAME_SONGS[gameKind]; if(!song||!ctx) return;
+    const sp=60/song.bpm/4;
+    while(gameNext<ctx.currentTime+0.18){ song.step(ctx,musicGain,gameStep%64,gameNext,sp); gameNext+=sp; gameStep++; stepsScheduled++; }
+  }
+  function gameMusic(kind){
+    if(!GAME_SONGS[kind]||!ensureCtx()) return;
+    if(!musicGain){ musicGain=ctx.createGain(); musicGain.gain.value=0; musicGain.connect(masterGain); }
+    if(gameKind===kind&&gameTimer) return;
+    const fromGame=!!gameKind||resumePending;
+    if(resumePending){ clearTimeout(resumeTO); resumePending=false; }
+    if(gameTimer) clearInterval(gameTimer);
+    gameKind=kind; gameStep=0; gameNext=ctx.currentTime+0.06;
+    const now=ctx.currentTime;
+    musicGain.gain.cancelScheduledValues(now); musicGain.gain.setValueAtTime(musicGain.gain.value,now); musicGain.gain.linearRampToValueAtTime(GAME_MUSIC_LEVEL,now+0.5);
+    if(!fromGame&&bgAudio){ bgWasPlaying=!bgAudio.paused; if(bgWasPlaying) fadeBg(0,450,()=>{ if(gameKind) bgAudio.pause(); }); }
+    gameTimer=setInterval(scheduleGame,25); scheduleGame();
+  }
+  function gameMusicStop(){
+    if(!gameKind) return;
+    clearInterval(gameTimer); gameTimer=null; gameKind=null;
+    if(ctx&&musicGain){ const now=ctx.currentTime; musicGain.gain.cancelScheduledValues(now); musicGain.gain.setValueAtTime(musicGain.gain.value,now); musicGain.gain.linearRampToValueAtTime(0,now+0.35); }
+    resumePending=true;
+    resumeTO=setTimeout(()=>{ resumePending=false; if(bgWasPlaying&&bgAudio){ bgAudio.volume=0; bgAudio.play().catch(()=>{}); fadeBg(BG_MUSIC_VOLUME,700); } },350);   // short pause so back-to-back games don't flicker
+  }
+  function musicDebug(){ return {game:gameKind,steps:stepsScheduled,bgPaused:bgAudio?bgAudio.paused:null,bgVolume:bgAudio?Math.round(bgAudio.volume*100)/100:null,bgRate:bgAudio?bgAudio.playbackRate:null,bgMuted:bgAudio?bgAudio.muted:null,master:masterGain?masterGain.gain.value:null,muted}; }
 
   function playCorrect(){
     if(!ensureCtx()) return;
@@ -755,7 +866,7 @@ const AudioEngine=(()=>{
   }
   function isMuted(){ return muted; }
 
-  return {startMusic,stopMusic,playCorrect,playWrong,playLevelUp,playBleep,setMuted,isMuted,ensureCtx};
+  return {startMusic,stopMusic,gameMusic,gameMusicStop,musicDebug,playCorrect,playWrong,playLevelUp,playBleep,setMuted,isMuted,ensureCtx};
 })();
 
 /* ============ FX LAYER (confetti / animated counters / toasts / mascot bubble) ============
@@ -1193,6 +1304,7 @@ function finishPracticeReward(s,score,total){
 function pgEl(tag,cls,text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 
 function renderPracticeMenu(s){
+  AudioEngine.gameMusicStop();
   const body=document.getElementById('practiceBody');
   body.innerHTML="";
   body.appendChild(pgEl('div','pgTitle','\ud83e\udde0 Brain Gym'));
@@ -1247,6 +1359,7 @@ function startPractice(s,mode){
     const back=pgEl('button','pgBtn alt','\u2190 Back'); back.type='button'; back.onclick=()=>renderPracticeMenu(s); body.appendChild(back);
     return;
   }
+  AudioEngine.gameMusic('brain');
   let idx=0, score=0;
   const answerLog=questions.map(q=>({q:q.q,picked:null,correct:false,correctText:q.choices[q.correct],explain:q.explain||""}));
 
@@ -1285,6 +1398,7 @@ function startPractice(s,mode){
   }
 
   function showResult(){
+    AudioEngine.gameMusicStop();
     body.innerHTML="";
     if(mode==='path') localStorage.setItem(pathKey(s.stuCode),String(startPos+steps));   // remember where they got to
     body.appendChild(pgEl('div','pgTitle','\ud83e\udde0 Brain Gym'));
@@ -1405,6 +1519,7 @@ function jumbleLoadProg(s){
 }
 
 function renderJumbleMenu(s){
+  AudioEngine.gameMusicStop();
   const body=document.getElementById('jumbleBody'); body.innerHTML="";
   body.appendChild(pgEl('div','pgTitle','\ud83e\udde9 Word Jumble'));
   body.appendChild(pgEl('div','pgSub','Put the jumbled words in the right order!'));
@@ -1426,6 +1541,7 @@ function renderJumbleMenu(s){
 }
 
 function startJumble(s){
+  AudioEngine.gameMusic('jumble');
   const sentences=jumbleToday(s);
   const prog=jumbleLoadProg(s);
   const results=prog.results;
@@ -1540,6 +1656,7 @@ function startJumble(s){
   }
 
   function finish(){
+    AudioEngine.gameMusicStop();
     const score=results.filter(r=>r.ok).length, total=sentences.length, today=dayStamp(new Date());
     localStorage.setItem(jumbleKey('jdate',s),today);
     localStorage.setItem(jumbleKey('jrounds',s),String(jumbleRoundsDone(s)+1));
@@ -1598,8 +1715,8 @@ function finishJumbleRewards(s,score,total){
    Right after a student logs in, a few friendly pop-ups (each with its own colour and its own
    little bleep) show what they can do today: Contest, the bonus question, Brain Gym and Word
    Jumble. Only things NOT done yet today are shown, so nobody is nagged about what is finished.
-   Every pop-up has an X (or "Maybe later") to dismiss it; "Let's go" opens that game and skips
-   the rest. Turn all of them off with WELCOME_POPUPS: false in settings.js. */
+   Every pop-up is dismissed with its X, which shows the next one; after the last X the student simply
+   carries on and plays whatever they like (no pop-up has a play button any more). Turn all of them off with WELCOME_POPUPS: false in settings.js. */
 let WELCOME_STATE=null;
 function welcomeQueue(s){
   const today=dayStamp(new Date()), q=[];
@@ -1610,7 +1727,7 @@ function welcomeQueue(s){
     if(c){
       const who=c.challengerName||"A classmate", chal=ALL.find(x=>x.stuCode===c.challengerStuCode), av=chal?avatarEmojiFor(chal,false)+" ":"";
       q.push({key:"contest",emoji:"⚔️",sparks:["💥","⚡","🔥","💥"],title:av+who+" challenged you!",
-        text:"They are waiting for your answers"+(pending.length>1?" (and "+(pending.length-1)+" more challenge"+(pending.length>2?"s":"")+" too)":"")+". Beat their score and win points!",
+        text:"They are waiting for your answers"+(pending.length>1?" (and "+(pending.length-1)+" more challenge"+(pending.length>2?"s":"")+" too)":"")+". Beat their score and win points! Look for the yellow card on your trail screen.",
         demo:[["white",av||"🙂"],["big","⚔️"],["white","You"]],btn:"⚔️ Play with "+who,
         go:()=>{ openModal('modalContest'); acceptChallenge(s,c); }});
     }else{
@@ -1655,10 +1772,8 @@ function showWelcome(i){
   body.appendChild(pgEl('div','wpTitle',w.title));
   body.appendChild(pgEl('div','wpText',w.text));
   const demo=pgEl('div','wpDemo',null); w.demo.forEach(d=>demo.appendChild(pgEl('span','wpChip '+d[0],d[1]))); body.appendChild(demo);
-  const btns=pgEl('div','wpBtns',null);
-  const go=pgEl('button','wpGo',w.btn); go.type='button'; go.onclick=()=>{ closeWelcome(false); w.go(); }; btns.appendChild(go);
-  const later=pgEl('button','wpLater',i+1<st.q.length?'Maybe later  ›':'Maybe later'); later.type='button'; later.onclick=()=>closeWelcome(true); btns.appendChild(later);
-  body.appendChild(btns); card.appendChild(body);
+  body.appendChild(pgEl('div','wpHint',i+1<st.q.length?'Tap the \u2715 to see the next tip':'Tap the \u2715 to start \u2014 then play whatever you like!'));
+  card.appendChild(body);
   ov.classList.add('show');
   AudioEngine.playBleep(w.key);
 }
@@ -5338,7 +5453,7 @@ function runContestRound(questions,onDone){
   pickerWrap.style.display="none";
   roundBox.style.display="block";
   document.getElementById('contestResultBox').innerHTML="";
-  AudioEngine.startMusic(true); // faster tempo during the timed round
+  AudioEngine.gameMusic('contest'); // the contest has its own tune now (the main track stays at normal speed)
 
   let idx=0, score=0, finished=false, locked=false, deadline=0;
   const secs=CONTEST_QUESTION_MS/1000;
@@ -5353,7 +5468,7 @@ function runContestRound(questions,onDone){
     finished=true;
     clearInterval(CONTEST_TIMER_HANDLE);
     CONTEST_TIMER_HANDLE=null;
-    AudioEngine.startMusic(false); // back to the normal ambient tempo
+    AudioEngine.gameMusicStop(); // contest over -> the main track fades back in
     roundBox.style.display="none";
     document.getElementById('contestPickerWrap').style.display="block";
     onDone(score,answerLog);
@@ -5651,6 +5766,7 @@ function startExtraQuestion(){
   document.getElementById('extraStatus').innerHTML="";
   const qBox=document.getElementById('qBox');
   qBox.style.display="block";
+  AudioEngine.gameMusic('bonus');
   document.getElementById('qLevel').textContent=`${CURRENT_STUDENT.classCode} \u2022 ${type==="lexis"?"Lexis":"Grammar"} question`;
   document.getElementById('qText').textContent=q.q;
   document.getElementById('qFeedback').innerHTML="";
@@ -5668,6 +5784,7 @@ function startExtraQuestion(){
 }
 
 function answerExtraQuestion(i,order,q,cWrap){
+  AudioEngine.gameMusicStop();
   const buttons=[...cWrap.querySelectorAll('button')];
   buttons.forEach((b,idx)=>{
     b.disabled=true;
@@ -5801,6 +5918,7 @@ function openModal(id){
   if(el) el.classList.add('open');
 }
 function closeAllModals(){
+  AudioEngine.gameMusicStop();   // closing a game window ends that game's tune
   document.querySelectorAll('.modalOverlay.open').forEach(el=>el.classList.remove('open'));
 }
 document.getElementById('menuStoryBtn').onclick=()=>openModal('modalStory');
