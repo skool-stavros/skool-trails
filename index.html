@@ -996,6 +996,7 @@ function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a
 function bumpStreak(stuCode,today){
   const data=loadStreak(stuCode);
   if(data.lastDate===today) return data; // already counted today
+  if(data.lastDate && daysBetween(data.lastDate,today)<0) return data;   // this device's clock is behind: never wipe a streak because of a wrong date
   data.count = data.lastDate ? (daysBetween(data.lastDate,today)===1 ? data.count+1 : 1) : 1;
   data.lastDate=today;
   data.best=Math.max(data.best||0,data.count);
@@ -1022,11 +1023,23 @@ function renderStreakChip(stuCode){
 // Count today towards the streak -- used by BOTH the daily question and a
 // finished Brain Gym round. Only the first one each day counts (the second
 // call is ignored), so doing both never counts twice or repeats the toast.
+// Sends today's streak to the sheet. It stays "pending" on this device until the sheet is seen to have it,
+// so a request that never arrives (no internet, script not updated, slow sheet) can never lose the streak.
+function sendStreakUpdate(s,day){
+  postToBackendJSON({action:"updateStreak",stuCode:s.stuCode,nickname:s.nickname||s.fullName,classCode:s.classCode,today:day}).then(res=>{
+    if(res&&res.ok===true&&!res.unknown){
+      localStorage.removeItem('sk_stkpend_'+s.stuCode);
+      if(typeof res.streak==='number'){ const d=loadStreak(s.stuCode); d.count=res.streak; saveStreak(s.stuCode,d); renderStreakChip(s.stuCode); }
+    }
+  });
+}
 function registerStreakDay(s){
   const today=dayStamp(new Date());
-  if(loadStreak(s.stuCode).lastDate===today) return loadStreak(s.stuCode);
+  const cur=loadStreak(s.stuCode);
+  if(cur.lastDate===today) return cur;
+  if(cur.lastDate && daysBetween(cur.lastDate,today)<0) return cur;      // wrong clock on this device: do nothing
   const data=bumpStreak(s.stuCode,today);
-  if(REWARDS_ENABLED) postToBackend({action:"updateStreak",stuCode:s.stuCode,nickname:s.nickname||s.fullName,classCode:s.classCode,today});
+  if(REWARDS_ENABLED){ localStorage.setItem('sk_stkpend_'+s.stuCode,today); sendStreakUpdate(s,today); }
   if([3,7,14,30,60,100].includes(data.count)){
     FX.toast(`\ud83d\udd25 ${data.count}-day streak! You're on fire!`,'streak');
     FX.confetti(document.getElementById('streakChip'),80);
@@ -1178,7 +1191,10 @@ function chooseAvatar(s,emoji){
   localStorage.setItem('sk_avatar_'+s.stuCode,emoji);
   if(REWARDS_ENABLED){
     REWARDS[s.stuCode]=Object.assign({streak:0,date:"",rubies:0,practiceDate:"",jumbleDate:"",jumbleRounds:0},REWARDS[s.stuCode]||{},{avatar:emoji});
-    postToBackend({action:"setAvatar",stuCode:s.stuCode,nickname:s.nickname||s.fullName,classCode:s.classCode,avatar:emoji});
+    localStorage.setItem('sk_avpend_'+s.stuCode,'1');     // kept on this device until the sheet is seen to have it
+    postToBackendJSON({action:"setAvatar",stuCode:s.stuCode,nickname:s.nickname||s.fullName,classCode:s.classCode,avatar:emoji}).then(res=>{
+      if(res&&res.ok===true&&!res.unknown) localStorage.removeItem('sk_avpend_'+s.stuCode);
+    });
   }
   closeAllModals();
   renderTrail(s,true);
@@ -2158,6 +2174,7 @@ const CHALLENGES_GID="1640397484";
 const REWARDS_GID=SKOOL_SETTINGS.REWARDS_GID||"PASTE_REWARDS_TAB_GID_HERE";
 const REWARDS_ENABLED=!!REWARDS_GID && REWARDS_GID.indexOf("PASTE_")!==0;
 let REWARDS={};   // stuCode -> {streak,date,rubies}
+let REWARDS_OK=true;   // false when the REWARDS tab could not be read this time (then this device keeps what it knows)
 const CHECKPOINTS=Array.from({length:21},(_,i)=>({t:i*10,label:i===0?"Start ❄️":i===20?"SEA! 🌊 200":`Level ${i}`}));
 let ALL=[];
 let CHALLENGES=[];
@@ -2236,19 +2253,29 @@ function parseChallenges(values){
   return rows;
 }
 // REWARDS tab layout: A=StuCode B=Nickname C=Class D=Streak E=LastStreakDate F=Rubies G=RubiesEarnedTotal H=LastPracticeDate I=LastJumbleDate J=JumbleRounds K=Avatar
+// Dates are always handled as yyyy-mm-dd, even if Google Sheets turned a cell into a "real" date shown as 28/10/2026.
+function normDate(v){
+  v=String(v==null?"":v).trim(); if(!v) return "";
+  if(/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0,10);
+  let m=v.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);
+  if(m){ let d=+m[1], mo=+m[2]; if(d<=12&&mo>12){ const t=d; d=mo; mo=t; } return m[3]+"-"+String(mo).padStart(2,"0")+"-"+String(d).padStart(2,"0"); }
+  m=v.match(/^(\d{4})[\/.](\d{1,2})[\/.](\d{1,2})/);
+  if(m) return m[1]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[3]).padStart(2,"0");
+  return "";
+}
 function parseRewards(values){
   const map={};
   values.forEach(r=>{
     const row=r.map(v=>String(v==null?"":v).trim());
     const code=row[0];
     if(!code||code.toLowerCase()==="stucode") return;
-    map[code]={streak:parseInt(row[3],10)||0,date:row[4]||"",rubies:parseInt(row[5],10)||0,practiceDate:row[7]||"",jumbleDate:row[8]||"",jumbleRounds:parseInt(row[9],10)||0,avatar:row[10]||""};
+    map[code]={streak:parseInt(row[3],10)||0,date:normDate(row[4]),rubies:parseInt(row[5],10)||0,practiceDate:normDate(row[7]),jumbleDate:normDate(row[8]),jumbleRounds:parseInt(row[9],10)||0,avatar:row[10]||""};
   });
   return map;
 }
 function loadRewards(){
   if(!REWARDS_ENABLED) return Promise.resolve({});
-  return loadGviz(REWARDS_GID,true).then(gvizToValues).then(parseRewards).catch(()=>({}));
+  return loadGviz(REWARDS_GID,true).then(gvizToValues).then(parseRewards).catch(()=>null);   // null = could not be read (different from 'empty')
 }
 // A streak only counts while it is unbroken: last answered today or yesterday.
 function effectiveStreak(streak,lastDate,today){
@@ -2259,17 +2286,29 @@ function effectiveStreak(streak,lastDate,today){
 // At login, the sheet is the truth: copy this student's streak/rubies from the
 // REWARDS tab into the local working copy the rest of the page reads.
 function syncRewardsCache(st){
-  if(!REWARDS_ENABLED) return;
-  const r=REWARDS[st.stuCode]||{streak:0,date:"",rubies:0};
-  const today=dayStamp(new Date());
-  const cur=loadStreak(st.stuCode);
-  const count=effectiveStreak(r.streak,r.date,today);
-  saveStreak(st.stuCode,{count:count,lastDate:r.date||null,best:Math.max(cur.best||0,count)});
-  localStorage.setItem(rubyKey(st.stuCode),String(r.rubies));
-  localStorage.setItem('sk_pdate_'+st.stuCode,r.practiceDate||"");
-  localStorage.setItem('sk_jdate_'+st.stuCode,r.jumbleDate||"");
-  localStorage.setItem('sk_jrounds_'+st.stuCode,String(r.jumbleRounds||0));
-  localStorage.setItem('sk_avatar_'+st.stuCode,r.avatar||"");
+  if(!REWARDS_ENABLED||!REWARDS_OK) return;      // the sheet could not be read this time: keep everything this device knows
+  const code=st.stuCode, r=REWARDS[code]||{streak:0,date:"",rubies:0}, today=dayStamp(new Date());
+  // streak: if today's streak was counted here but the sheet has not received it yet, keep it and send it again
+  const pend=localStorage.getItem('sk_stkpend_'+code), cur=loadStreak(code);
+  if(pend && (!r.date || r.date<pend)){
+    sendStreakUpdate(st,pend);
+  }else{
+    if(pend) localStorage.removeItem('sk_stkpend_'+code);
+    const count=effectiveStreak(r.streak,r.date,today);
+    saveStreak(code,{count:count,lastDate:r.date||null,best:Math.max(cur.best||0,count)});
+  }
+  localStorage.setItem(rubyKey(code),String(r.rubies));
+  localStorage.setItem('sk_pdate_'+code,r.practiceDate||"");
+  localStorage.setItem('sk_jdate_'+code,r.jumbleDate||"");
+  localStorage.setItem('sk_jrounds_'+code,String(r.jumbleRounds||0));
+  // avatar: same idea -- a choice the sheet has not received yet is kept and sent again
+  const local=localStorage.getItem('sk_avatar_'+code)||"";
+  if(localStorage.getItem('sk_avpend_'+code)==="1"){
+    if((r.avatar||"")===local) localStorage.removeItem('sk_avpend_'+code);
+    else postToBackend({action:"setAvatar",stuCode:code,nickname:st.nickname||st.fullName,classCode:st.classCode,avatar:local});
+  }else{
+    localStorage.setItem('sk_avatar_'+code,r.avatar||"");
+  }
 }
 
 function loadChallenges(){
@@ -5876,7 +5915,7 @@ async function init(){
   try{const gviz=await loadGviz(GID,true); const vals=gvizToValues(gviz).slice(FIRST_DATA_ROW-1); ALL=parseValues(vals); if(ALL.length>0) setStatus(`✓ Live • ${ALL.length} students • 200 pts • Mountains to Sea`,"ok");}catch(e){setStatus("Failed to load","err");}
   renderHallOfFame();
   CHALLENGES=await loadChallenges();
-  REWARDS=await loadRewards();
+  { const rw=await loadRewards(); REWARDS_OK=rw!==null; REWARDS=rw||{}; }
   { const jx=await loadJumbleSheet(); JUMBLE_EXTRA=jx.extra; JUMBLE_ONLY=jx.only; }
 }
 document.getElementById('loginBtn').onclick=()=>{
