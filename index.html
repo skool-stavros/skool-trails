@@ -744,6 +744,17 @@ const GAME_SONGS={
   }}
 };
 const GAME_MUSIC_LEVEL=0.3, BG_MUSIC_VOLUME=0.35;
+// Short, cheerful "bleeps" for the login pop-ups: [frequency, start, length, wave, volume]. Every pop-up has its own tune.
+const BLEEP_TUNES={
+  contest:[[392.00,0,.10,"square",.35],[523.25,.09,.10,"square",.35],[659.25,.18,.10,"square",.35],[783.99,.27,.22,"square",.35]],   // bold, rising "challenge!"
+  bonus:  [[880.00,0,.09,"sine",.9],[1108.7,.08,.09,"sine",.9],[1318.5,.16,.09,"sine",.9],[1760.0,.24,.26,"sine",.9]],            // sparkly
+  brain:  [[523.25,0,.12,"triangle",1],[783.99,.12,.12,"triangle",1],[659.25,.24,.12,"triangle",1],[1046.5,.36,.22,"triangle",1]],   // bouncy
+  jumble: [[440.00,0,.12,"sine",1],[587.33,.11,.12,"sine",1],[523.25,.22,.12,"sine",1],[698.46,.33,.12,"sine",1],[880.00,.44,.2,"sine",1]]  // wobbly
+};
+// Loudness balance: measured so that every pop-up bleep and every game tune is as loud as the main song
+// (the song plays at BG_MUSIC_VOLUME). 1 = unchanged.
+const BLEEP_GAIN={"contest":1.928,"bonus":0.813,"brain":1.135,"jumble":0.966};
+const GAME_TUNE_GAIN={"contest":5.821,"brain":10.116,"jumble":9.016,"bonus":9.016};
 
 const AudioEngine=(()=>{
   let ctx=null, masterGain=null;
@@ -758,7 +769,9 @@ const AudioEngine=(()=>{
       ctx=new AC();
       masterGain=ctx.createGain();
       masterGain.gain.value=muted?0:0.5;
-      masterGain.connect(ctx.destination);
+      const lim=ctx.createDynamicsCompressor();      // safety limiter: only acts if the mix would get close to distortion
+      lim.threshold.value=-1; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.002; lim.release.value=0.12;
+      masterGain.connect(lim); lim.connect(ctx.destination);
     }
     if(ctx.state==="suspended") ctx.resume();
     return ctx;
@@ -812,7 +825,7 @@ const AudioEngine=(()=>{
     if(gameTimer) clearInterval(gameTimer);
     gameKind=kind; gameStep=0; gameNext=ctx.currentTime+0.06;
     const now=ctx.currentTime;
-    musicGain.gain.cancelScheduledValues(now); musicGain.gain.setValueAtTime(musicGain.gain.value,now); musicGain.gain.linearRampToValueAtTime(GAME_MUSIC_LEVEL,now+0.5);
+    musicGain.gain.cancelScheduledValues(now); musicGain.gain.setValueAtTime(musicGain.gain.value,now); musicGain.gain.linearRampToValueAtTime(GAME_MUSIC_LEVEL*(GAME_TUNE_GAIN[kind]||1),now+0.5);
     if(!fromGame&&bgAudio){ bgWasPlaying=!bgAudio.paused; if(bgWasPlaying) fadeBg(0,450,()=>{ if(gameKind) bgAudio.pause(); }); }
     gameTimer=setInterval(scheduleGame,25); scheduleGame();
   }
@@ -825,37 +838,37 @@ const AudioEngine=(()=>{
   }
   function musicDebug(){ return {game:gameKind,steps:stepsScheduled,bgPaused:bgAudio?bgAudio.paused:null,bgVolume:bgAudio?Math.round(bgAudio.volume*100)/100:null,bgRate:bgAudio?bgAudio.playbackRate:null,bgMuted:bgAudio?bgAudio.muted:null,master:masterGain?masterGain.gain.value:null,muted}; }
 
+  // While a game tune is playing, the answer sounds are lifted so they still stand out clearly above the music.
+  function sfxBoost(kind){ return gameKind?({correct:2.2,wrong:4.4,levelup:1.6}[kind]||1):1; }
   function playCorrect(){
     if(!ensureCtx()) return;
-    tone(523.25,0,   0.14,"triangle",1);
-    tone(659.25,0.10,0.16,"triangle",1);
-    tone(783.99,0.20,0.24,"triangle",1);
+    const b=sfxBoost('correct');
+    tone(523.25,0,   0.14,"triangle",1*b);
+    tone(659.25,0.10,0.16,"triangle",1*b);
+    tone(783.99,0.20,0.24,"triangle",1*b);
   }
   function playWrong(){
     if(!ensureCtx()) return;
-    tone(196.00,0,   0.18,"sawtooth",0.6);
-    tone(146.83,0.12,0.28,"sawtooth",0.6);
+    const b=sfxBoost('wrong');
+    tone(196.00,0,   0.18,"sawtooth",0.6*b);
+    tone(146.83,0.12,0.28,"sawtooth",0.6*b);
   }
   // A brighter, longer fanfare for milestones: level-ups, finishing the
   // trail, personal bests and streak milestones all share this.
   function playLevelUp(){
     if(!ensureCtx()) return;
-    tone(523.25,0,   0.16,"triangle",1);
-    tone(659.25,0.09,0.16,"triangle",1);
-    tone(783.99,0.18,0.16,"triangle",1);
-    tone(1046.5,0.27,0.34,"triangle",1);
+    const b=sfxBoost('levelup');
+    tone(523.25,0,   0.16,"triangle",1*b);
+    tone(659.25,0.09,0.16,"triangle",1*b);
+    tone(783.99,0.18,0.16,"triangle",1*b);
+    tone(1046.5,0.27,0.34,"triangle",1*b);
   }
 
   // Short, cheerful "bleeps" for the login pop-ups -- every pop-up has its own little tune.
   function playBleep(kind){
     if(!ensureCtx()) return;
-    const tunes={
-      contest:[[392.00,0,.10,"square",.35],[523.25,.09,.10,"square",.35],[659.25,.18,.10,"square",.35],[783.99,.27,.22,"square",.35]],   // bold, rising "challenge!"
-      bonus:  [[880.00,0,.09,"sine",.9],[1108.7,.08,.09,"sine",.9],[1318.5,.16,.09,"sine",.9],[1760.0,.24,.26,"sine",.9]],            // sparkly
-      brain:  [[523.25,0,.12,"triangle",1],[783.99,.12,.12,"triangle",1],[659.25,.24,.12,"triangle",1],[1046.5,.36,.22,"triangle",1]],   // bouncy
-      jumble: [[440.00,0,.12,"sine",1],[587.33,.11,.12,"sine",1],[523.25,.22,.12,"sine",1],[698.46,.33,.12,"sine",1],[880.00,.44,.2,"sine",1]]  // wobbly
-    };
-    (tunes[kind]||tunes.bonus).forEach(t=>tone(t[0],t[1],t[2],t[3],t[4]));
+    const k=BLEEP_TUNES[kind]?kind:"bonus", g=BLEEP_GAIN[k]||1;
+    BLEEP_TUNES[k].forEach(t=>tone(t[0],t[1],t[2],t[3],t[4]*g));
   }
 
   function setMuted(m){
@@ -1258,7 +1271,7 @@ function renderStickerAlbum(s){
 const PRACTICE_BLOCK=10, PATH_STEPS_PER_BLOCK=5;
 function bankFor(classCode){ return classBank(classCode); }
 function coveredLimit(classCode){
-  return ORDERED_CLASSES.has(classCode) ? Math.max(1,dayIndexFor(classCode,new Date())) : Infinity;
+  return ORDERED_CLASSES.has(classCode) ? Math.max(1,dayIndexFor(classCode,new Date())*paceFor(classCode)) : Infinity;
 }
 function practicePool(classCode,type){
   const b=bankFor(classCode), lim=coveredLimit(classCode);
@@ -4174,14 +4187,330 @@ const EA1_BANK=bank(
   ]
 );
 const EA2_BANK=bank(
-  [
-    ["Which hobby involves kicking a ball?","football","chess","painting","Football involves kicking a ball."],
-    ["a place where you borrow books =","a library","a bakery","a garage","A library is where you borrow books."],
-    ["free time activity =","hobby","homework","timetable","A hobby is a free-time activity."]
-  ],[
-    ["Yesterday I ___ (watch) a great film.","watched","watch","watching","Regular past simple adds -ed."],
-    ["Last year she ___ (go) to Italy.","went","goed","go","'Go' is irregular: go\u2192went."],
-    ["We ___ (not/have) time to visit the museum.","didn't have","not had","haven't had","Negative past simple: didn't + base verb."]
+  [ // lexis -- the REAL EA2 coursebook word list, in book order, 10 per section. Modules 1-4 so far
+    // (more modules are added as they are written; the plan stops at Module 10). The bank is paced at
+    // 2 items a day -- see CLASS_PACE -- so the whole book is reached during the school year.
+    ["something that makes you feel a little angry or irritated is =", "annoying", "original", "latest", "'Annoying' describes something that irritates you."],
+    ["the job or profession that someone does for many years of their life =", "career", "degree", "schedule", "A career is the work you do for a large part of your life."],
+    ["something new and difficult that tests your ability =", "challenge", "comment", "detail", "A challenge is something difficult that tests you."],
+    ["good at inventing new ideas and making original things =", "creative", "annoying", "latest", "A creative person has lots of new ideas."],
+    ["to give someone confidence and support so that they keep trying =", "encourage", "discover", "reply", "To encourage someone is to give them confidence."],
+    ["to make something better =", "improve", "schedule", "review", "To improve means to make something better."],
+    ["a plan that shows when things will happen =", "schedule", "workout", "degree", "A schedule is a plan with times and dates."],
+    ["a natural ability to do something very well =", "talent", "fitness", "detail", "Talent is a natural ability."],
+    ["to stop trying to do something because it is too difficult =", "give up", "do one's best", "focus on", "To give up means to stop trying."],
+    ["to be extremely happy about something =", "be over the moon", "be keen on", "give up", "'Be over the moon' means to be extremely happy."],
+    ["in or to a foreign country =", "abroad", "personally", "definitely", "'Abroad' means in or to another country."],
+    ["a prize that you get for doing something very well =", "award", "brand", "degree", "An award is a prize."],
+    ["a person who gathers and keeps things of one kind as a hobby =", "collector", "follower", "trainer", "A collector keeps a collection, for example of stamps."],
+    ["easy to use or suitable for what you need =", "convenient", "passive", "relaxing", "Something convenient is easy and suitable."],
+    ["a person whose job is to write articles for newspapers or news websites =", "journalist", "receptionist", "trainer", "A journalist writes news stories."],
+    ["a person who welcomes visitors and answers the phone in an office or hotel =", "receptionist", "stylist", "interviewer", "A receptionist works at the reception desk."],
+    ["to spend time with other people in a friendly way =", "socialise", "escape", "instruct", "To socialise is to spend friendly time with others."],
+    ["to be tired of something and not want any more of it =", "be sick of", "be fond of", "be crazy about", "'Be sick of' means to be fed up with something."],
+    ["to try hard to do something =", "make an effort", "make an excuse", "make a decision", "To make an effort is to try hard."],
+    ["to do something to help another person =", "do sb a favour", "do business", "do research", "Doing someone a favour means helping them."],
+    ["to succeed in getting something good, usually after hard work =", "achieve", "attend", "retire", "To achieve is to succeed in reaching something."],
+    ["to go to an event such as a lesson or a meeting =", "attend", "compete", "retire", "To attend is to be present at an event."],
+    ["the name of a product that is made by a particular company =", "brand", "goal", "speech", "A brand is the name of a company's product."],
+    ["a person who trains an athlete or a team =", "coach", "collector", "journalist", "A coach trains sports people."],
+    ["to try to win a race or a competition =", "compete", "retire", "join", "To compete is to try to win."],
+    ["able to speak a language easily and without mistakes =", "fluent", "cooperative", "educational", "If you are fluent, you speak easily and well."],
+    ["something that you want to achieve in the future =", "goal", "brand", "speech", "A goal is something you want to achieve."],
+    ["to stop working because you have reached a certain age =", "retire", "compete", "join", "To retire is to stop working, usually when you are old."],
+    ["a formal talk that is given to an audience =", "speech", "reply", "comment", "A speech is a formal talk."],
+    ["to succeed in doing something that is difficult =", "manage to", "give up", "turn off", "'Manage to' means to succeed in doing something difficult."],
+    ["the way the Earth's weather is slowly becoming warmer and different =", "climate change", "energy", "quality", "Climate change is the change in the Earth's weather over time."],
+    ["to give money, time or ideas to help something succeed =", "contribute", "include", "save", "To contribute is to give something to help."],
+    ["to have a different opinion from someone else =", "disagree", "introduce", "identify", "To disagree is to have a different opinion."],
+    ["providing knowledge or teaching you something =", "educational", "cooperative", "local", "An educational programme teaches you something."],
+    ["to spend free time with friends =", "hang out", "give birth", "turn off", "To hang out is to spend relaxed time with friends."],
+    ["to recognise someone or something and say who or what it is =", "identify", "include", "introduce", "To identify is to recognise and name something."],
+    ["belonging to the area where you live =", "local", "educational", "cooperative", "A local shop is in your own area."],
+    ["a talk in which you show information to a group of people =", "presentation", "quality", "kit", "A presentation is a talk that shows information."],
+    ["Which phrase asks a friend to stay in contact with you?", "Keep in touch.", "You have a point.", "I can't wait to...", "'Keep in touch' means 'write or call me'."],
+    ["Which phrase means 'what you said is true or makes sense'?", "You have a point.", "Keep in touch.", "I think the opposite is true.", "'You have a point' means 'you are right about that'."],
+    ["extremely surprised =", "astonished", "exhausted", "cheerful", "'Astonished' means extremely surprised."],
+    ["a light, gentle wind =", "breeze", "cliff", "mud", "A breeze is a light wind."],
+    ["happy and positive =", "cheerful", "injured", "exhausted", "A cheerful person is happy and positive."],
+    ["a high, steep wall of rock, often next to the sea =", "cliff", "breeze", "gap", "A cliff is a steep rock wall."],
+    ["a piece of information that helps you solve a mystery =", "clue", "cliff", "mud", "A clue helps you find the answer."],
+    ["the place where someone is going =", "destination", "campsite", "position", "Your destination is where you are travelling to."],
+    ["extremely tired =", "exhausted", "injured", "astonished", "'Exhausted' means extremely tired."],
+    ["an organised journey to explore or research a place =", "expedition", "rescue team", "signpost", "An expedition is an organised exploring trip."],
+    ["to find or meet something or someone by chance =", "come across", "carry on", "set up", "'Come across' means to find by chance."],
+    ["to continue doing something =", "carry on", "search for", "shake", "'Carry on' means to continue."],
+    ["something good that helps you to be more successful =", "advantage", "disadvantage", "sight", "An advantage is a good thing that helps you."],
+    ["as said or shown by someone or something =", "according to", "similar to", "as a result", "'According to' introduces what a person or source says."],
+    ["feeling shy or uncomfortable in front of other people =", "embarrassed", "annoyed", "frightened", "'Embarrassed' means ashamed or uncomfortable."],
+    ["films, music and shows that people enjoy =", "entertainment", "excursion", "safety", "Entertainment is what people enjoy watching or listening to."],
+    ["a person who travels to unknown places to find out about them =", "explorer", "creator", "collector", "An explorer discovers new places."],
+    ["outside, not in a building =", "outdoors", "abroad", "nearby", "'Outdoors' means outside."],
+    ["to need something, or to make something necessary =", "require", "seem", "affect", "To require is to need or demand."],
+    ["almost the same as something else =", "similar to", "full of", "according to", "'Similar to' means almost the same as."],
+    ["a number of different types of things =", "variety", "safety", "sight", "A variety is a number of different kinds."],
+    ["to think of an idea or a plan =", "come up with", "come down with", "go through", "'Come up with' means to think of an idea."],
+    ["willing to try new and exciting things =", "adventurous", "peaceful", "lonely", "An adventurous person likes trying new things."],
+    ["to act in a particular way =", "behave", "invent", "panic", "To behave is to act in a certain way."],
+    ["relaxed and not worried or angry =", "calm", "confused", "lonely", "'Calm' means quiet and relaxed."],
+    ["not able to understand or think clearly =", "confused", "relieved", "peaceful", "'Confused' means not clear in your mind."],
+    ["to create something completely new =", "invent", "explore", "notice", "To invent is to create something new."],
+    ["sad because you have no friends or people with you =", "lonely", "calm", "adventurous", "'Lonely' means sad and alone."],
+    ["to see or become aware of something =", "notice", "remain", "behave", "To notice is to become aware of something."],
+    ["happy because something bad did not happen or has ended =", "relieved", "confused", "lonely", "'Relieved' means glad that a worry has gone."],
+    ["animals and plants that live in nature =", "wildlife", "turquoise", "nightmare", "Wildlife is wild animals and plants."],
+    ["to finally be in a place or situation that you did not plan =", "end up", "grow up", "make up", "'End up' means to finally arrive somewhere unplanned."],
+    ["worried and nervous about something =", "anxious", "delighted", "pleasant", "'Anxious' means worried."],
+    ["extremely big =", "enormous", "tiny", "pleasant", "'Enormous' means extremely big."],
+    ["extremely angry =", "furious", "delighted", "miserable", "'Furious' means extremely angry."],
+    ["very unhappy =", "miserable", "pleased", "pleasant", "'Miserable' means very unhappy."],
+    ["extremely hungry =", "starving", "exhausted", "furious", "'Starving' means extremely hungry."],
+    ["extremely small =", "tiny", "enormous", "muddy", "'Tiny' means extremely small."],
+    ["very quickly and unexpectedly =", "all of a sudden", "fall asleep", "make sure", "'All of a sudden' means suddenly."],
+    ["to check that something is true or has been done =", "make sure", "fall asleep", "hold one's breath", "'Make sure' means to check."],
+    ["completely wet =", "soaked to the skin", "starving", "muddy", "'Soaked to the skin' means totally wet."],
+    ["so good that it is hard to believe =", "too good to be true", "the next thing I knew", "I have no choice", "'Too good to be true' means almost unbelievable."],
+    ["to say that you have done something wrong, or that something is true =", "admit", "complain", "protect", "To admit is to say something is true, often something bad."],
+    ["a person who writes books =", "author", "expert", "headteacher", "An author writes books."],
+    ["a situation where different things are in equal amounts =", "balance", "solution", "method", "Balance means equal amounts of different things."],
+    ["to say that you are not happy or satisfied about something =", "complain", "admit", "remove", "To complain is to say you are not satisfied."],
+    ["a person with a lot of knowledge or skill in a subject =", "expert", "author", "headteacher", "An expert knows a lot about a subject."],
+    ["always telling the truth =", "honest", "independent", "upset", "An honest person tells the truth."],
+    ["able to do things by yourself without needing help =", "independent", "honest", "available", "'Independent' means not needing others."],
+    ["to keep someone or something safe from harm =", "protect", "admit", "complain", "To protect is to keep safe."],
+    ["an answer to a problem =", "solution", "balance", "support", "A solution solves a problem."],
+    ["unhappy or worried because something bad has happened =", "upset", "honest", "independent", "'Upset' means unhappy because of something bad."],
+    ["to tell people something officially =", "announce", "cancel", "slow down", "To announce is to say something officially."],
+    ["to decide that a planned event will not happen =", "cancel", "announce", "speak up", "To cancel is to stop a planned event."],
+    ["the time of your life when you are a child =", "childhood", "opportunity", "traffic", "Childhood is the years when you are a child."],
+    ["buildings, equipment and services provided for people to use =", "facilities", "pollution", "traffic", "Facilities are places and equipment for use."],
+    ["a chance to do something good =", "opportunity", "decision", "pollution", "An opportunity is a good chance."],
+    ["a brother or a sister =", "sibling", "childhood", "listener", "A sibling is a brother or sister."],
+    ["to have a friendly relationship with someone =", "get on well with", "slow down", "speak up", "'Get on well with' means to have a good relationship."],
+    ["friendly and enjoying being with other people =", "sociable", "stubborn", "heavy", "A sociable person likes company."],
+    ["refusing to change your mind even when people give good reasons =", "stubborn", "optimistic", "helpful", "A stubborn person does not change their mind."],
+    ["expecting good things to happen in the future =", "optimistic", "stubborn", "sociable", "An optimistic person expects good things."],
+    ["to say sorry for something you did =", "apologise for", "insist on", "cope with", "To apologise is to say sorry."],
+    ["to deal successfully with a difficult situation =", "cope with", "depend on", "apologise for", "To cope with is to manage a difficult situation."],
+    ["to need someone or something in order to survive or succeed =", "depend on", "cope with", "insist on", "'Depend on' means to need or rely on."],
+    ["in the same place, looking at each other =", "face to face", "one another", "at the bottom of", "'Face to face' means in person."],
+    ["a relationship between friends =", "friendship", "personality", "tradition", "Friendship is the relationship between friends."],
+    ["perfect for a particular purpose =", "ideal", "certain", "single", "'Ideal' means perfect."],
+    ["intentionally, not by accident =", "on purpose", "generally speaking", "in the middle of", "'On purpose' means deliberately."],
+    ["to have a good opinion of someone and treat them politely =", "respect", "maintain", "exchange", "To respect is to admire and treat politely."],
+    ["a custom that has existed for a long time =", "tradition", "friendship", "stage", "A tradition is an old custom."],
+    ["to say firmly that you must have or do something =", "insist on", "apologise for", "depend on", "To insist on is to demand firmly."],
+    ["to have enough money to buy or pay for something =", "afford", "rent", "waste", "To afford is to have enough money for."],
+    ["pleasant to look at, or interesting =", "attractive", "reasonable", "fascinated", "'Attractive' means pleasant to look at."],
+    ["a large natural hole in the side of a hill or under the ground =", "cave", "campus", "location", "A cave is a natural hole in rock."],
+    ["two, or a few =", "a couple of", "plenty of", "according to", "'A couple of' means two or a few."],
+    ["to become familiar with something new until it feels normal =", "get used to", "rely on", "give up", "To get used to is to become familiar."],
+    ["a visit around a place with a person who explains things =", "guided tour", "public transport", "camping gear", "A guided tour has a guide who explains."],
+    ["the freedom to be alone and not be watched or disturbed =", "privacy", "service", "location", "Privacy is being alone and undisturbed."],
+    ["buses, trains and other vehicles that anyone can use =", "public transport", "guided tour", "quality of life", "Public transport is for everybody to use."],
+    ["fair and not too expensive =", "reasonable", "attractive", "fascinated", "'Reasonable' means fair, not too expensive."],
+    ["to pay money to use a flat or a house that belongs to someone else =", "rent", "afford", "waste", "To rent is to pay to use someone else's home."],
+    ["to respect and like someone or something very much =", "admire", "hunt", "pick", "To admire is to respect and like."],
+    ["very, very old, from a long time ago =", "ancient", "impressive", "colourful", "'Ancient' means from a very long time ago."],
+    ["the feeling that a place or situation gives you =", "atmosphere", "region", "vehicle", "Atmosphere is the feeling of a place."],
+    ["very pleasant and attractive =", "charming", "mysterious", "exact", "'Charming' means very pleasant."],
+    ["a piece of land that is higher than the land around it but lower than a mountain =", "hill", "valley", "coast", "A hill is a small mountain."],
+    ["making you feel admiration because it is very good or very big =", "impressive", "ancient", "mysterious", "'Impressive' makes you admire it."],
+    ["strange and difficult to understand or explain =", "mysterious", "enjoyable", "exact", "'Mysterious' means strange and unexplained."],
+    ["a large area of a country or the world =", "region", "stall", "vehicle", "A region is a large area."],
+    ["a table or small shop in a market where things are sold =", "stall", "vehicle", "region", "A stall sells things in a market."],
+    ["a machine such as a car or a bus that takes people from place to place =", "vehicle", "stall", "region", "A vehicle carries people or things."],
+    ["a vehicle that you can drive and also sleep in on holiday =", "camper van", "guidebook", "resort", "A camper van is a car you can sleep in."],
+    ["near or relating to the land next to the sea =", "coastal", "inexpensive", "cultural", "'Coastal' means by the coast."],
+    ["a style of cooking from a particular country or region =", "cuisine", "equipment", "resort", "Cuisine is a style of cooking."],
+    ["the things that you need for a particular activity =", "equipment", "guidebook", "volcano", "Equipment is the things you need for an activity."],
+    ["a book that gives visitors information about a place =", "guidebook", "road trip", "tour guide", "A guidebook gives information to visitors."],
+    ["not costing a lot of money =", "inexpensive", "luxurious", "valuable", "'Inexpensive' means cheap."],
+    ["very comfortable and expensive =", "luxurious", "inexpensive", "flexible", "'Luxurious' means very comfortable and costly."],
+    ["a place where many people go for a holiday =", "resort", "guidebook", "cuisine", "A resort is a holiday place."],
+    ["a mountain with a hole at the top from which hot melted rock can come out =", "volcano", "waterfall", "bay", "A volcano can erupt."],
+    ["a place where a river falls from a high place down to a lower place =", "waterfall", "volcano", "jungle", "A waterfall is falling river water."],
+    ["a place where you can stay, for example a hotel or a flat =", "accommodation", "landscape", "canal", "Accommodation is a place to stay."],
+    ["in addition to =", "as well as", "according to", "similar to", "'As well as' means in addition to."],
+    ["to be in a particular place =", "be located", "set off", "hop on", "'Be located' means to be situated somewhere."],
+    ["so beautiful or surprising that it takes your breath away =", "breathtaking", "historic", "various", "'Breathtaking' means amazingly beautiful."],
+    ["a long, narrow man-made river for boats =", "canal", "landscape", "bay", "A canal is an artificial waterway."],
+    ["the length of time that something lasts =", "duration", "accommodation", "flight", "Duration is how long something lasts."],
+    ["important in history =", "historic", "royal", "various", "'Historic' means important in history."],
+    ["everything you can see when you look across an area of land =", "landscape", "canal", "duration", "A landscape is the view of the land."],
+    ["a way of travelling, such as a bus, a train or a plane =", "means of transport", "accommodation", "on board", "Means of transport are ways to travel."],
+    ["to start a journey =", "set off", "hop on", "miss a chance", "'Set off' means to start a journey."],
+    ["in the middle of, or surrounded by =", "among", "per", "while", "'Among' means in the middle of."],
+    ["the art of designing buildings =", "architecture", "craft", "scenery", "Architecture is the art of designing buildings."],
+    ["to make someone notice or become interested =", "catch sb's attention", "make a recommendation", "miss a chance", "'Catch someone's attention' means to make them notice."],
+    ["an activity of making things by hand =", "craft", "landmark", "scenery", "A craft is making things by hand."],
+    ["a person who rides a bicycle =", "cyclist", "tour guide", "professor", "A cyclist rides a bike."],
+    ["something you have always wanted that finally happens =", "dream come true", "nightmare", "landmark", "A dream come true is a wish that happens."],
+    ["made by a person using their hands, not by a machine =", "handmade", "open-air", "spicy", "'Handmade' means made by hand."],
+    ["a famous building or place that is easy to recognise =", "landmark", "craft", "scenery", "A landmark is easy to recognise."],
+    ["the natural things that you can see around you in the countryside =", "scenery", "architecture", "landmark", "Scenery is the natural view."],
+    ["having a strong, hot flavour =", "spicy", "delicious", "handmade", "'Spicy' food tastes hot."]
+  ],[ // grammar -- from the book's grammar reference, 40 per module, same order
+    ["Water ___ at 100 °C.", "boils", "is boiling", "boiled", "A general truth uses the Present Simple."],
+    ["Look! The cat ___ the fish.", "is eating", "eats", "ate", "An action happening now uses the Present Progressive."],
+    ["Sam ___ in a bank. He has had the same job for ten years.", "works", "is working", "worked", "A permanent situation uses the Present Simple."],
+    ["I ___ a language course this month.", "am taking", "take", "took", "A temporary situation uses the Present Progressive."],
+    ["According to the timetable, the bus ___ at 8.15 tomorrow.", "leaves", "left", "has left", "Timetables and programmes use the Present Simple for the future."],
+    ["We ___ Ireland this summer. We have already booked the flights.", "are visiting", "visit", "visited", "A future arrangement uses the Present Progressive."],
+    ["He is always ___ his clothes on the floor! It is so annoying.", "leaving", "leaves", "left", "'Always' with the Present Progressive expresses an annoying habit."],
+    ["I usually ___ an egg for breakfast.", "eat", "am eating", "ate", "'Usually' shows a habit: Present Simple."],
+    ["Is she ___ to music at the moment?", "listening", "listen", "listens", "'At the moment' needs the Present Progressive: is + -ing."],
+    ["He ___ football every Monday and he loves it.", "plays", "is playing", "played", "A regular habit uses the Present Simple."],
+    ["Why are you ___ at me?", "looking", "look", "looked", "After 'are you' we use the -ing form."],
+    ["Does she ___ at the weekend?", "work", "works", "working", "After 'does' we use the base form."],
+    ["I ___ what you mean, so please explain.", "don't understand", "am not understanding", "not understand", "'Understand' is a stative verb: it is not used in the progressive."],
+    ["She ___ a lot of money. She is very rich.", "has", "is having", "have", "'Have' meaning 'possess' is stative: Present Simple."],
+    ["This soup ___ delicious.", "tastes", "is tasting", "taste", "'Taste' meaning 'seem to have a flavour' is stative."],
+    ["Mum ___ the soup to see if it is ready.", "is tasting", "tastes", "taste", "'Taste' meaning 'try food' can be progressive."],
+    ["I ___ about my summer holidays at the moment.", "am thinking", "think", "thought", "'Think' meaning 'use your mind' can be progressive."],
+    ["He ___ the doctor tonight.", "is seeing", "sees", "see", "'See' meaning 'visit' can be progressive."],
+    ["I ___ out with Jim yesterday.", "went", "go", "have gone", "'Yesterday' needs the Past Simple."],
+    ["Did she ___ the strawberries last night?", "wash", "washed", "washing", "After 'did' we use the base form."],
+    ["They ___ to school on Sunday. It was a holiday.", "didn't go", "didn't went", "not go", "The negative is didn't + base form."],
+    ["Mary often ___ fishing with her dad when she was a child.", "went", "goes", "was going", "A repeated action in the past uses the Past Simple."],
+    ["I ___ in London for 20 years, but now I live in Athens.", "lived", "have lived", "live", "A finished period in the past uses the Past Simple."],
+    ["She washed the strawberries, cut them into pieces and ___ them.", "ate", "has eaten", "was eating", "Actions one after the other in the past use the Past Simple."],
+    ["When I was young, I ___ swim very well.", "could", "can", "will", "The Past Simple of 'can' is 'could'."],
+    ["What time did you ___ up yesterday?", "get", "got", "getting", "After 'did' we use the base form."],
+    ["I ___ be overweight when I was younger.", "used to", "use to", "am used to", "used to + base form describes a past state."],
+    ["Did you ___ sleep with the light on?", "use to", "used to", "using to", "In questions with 'did' we write 'use to'."],
+    ["They ___ travel by car, but now they take the train.", "used to", "use to", "are used to", "used to + base form describes a past habit."],
+    ["He didn't ___ work on Saturdays.", "use to", "used to", "using to", "In negatives with 'didn't' we write 'use to'."],
+    ["My father ___ drive to work, but now he walks.", "used to", "is used to", "uses to", "used to + base form: something that is no longer true."],
+    ["We ___ go out every day, but we don't any more.", "used to", "use to", "are used to", "'Used to' shows a repeated action in the past that stopped."],
+    ["Mr Smith ___ be a teacher, but now he is a writer.", "used to", "would", "uses to", "We use 'used to', not 'would', for past states."],
+    ["My grandmother ___ always wake up at 6 o'clock in the morning.", "would", "will", "had", "'Would' describes a past habit."],
+    ["Every night, Linda ___ turn on the radio and drink a hot coffee after dinner.", "would", "will", "is", "'Would' describes typical behaviour in the past."],
+    ["Which sentence is correct?", "My brother used to be shy.", "My brother would be shy.", "My brother use to be shy.", "'Would' is not used for past states. Use 'used to'."],
+    ["When I was a child, we ___ go to the beach every Sunday.", "would", "will", "had", "'Would' can describe a repeated action in the past."],
+    ["When we were children, my brother and I ___ play in the garden until dark.", "would", "will", "do", "'Would' + base form shows a past habit."],
+    ["Every summer, Dad ___ take us fishing at the lake.", "would", "will", "is", "'Would' + base form describes past habits."],
+    ["Which sentence is correct?", "We used to live in a small flat.", "We would live in a small flat.", "We use to live in a small flat.", "'Live' here is a past state, so we use 'used to'. 'Would' is for repeated actions."],
+    ["At 6 o'clock yesterday evening, Karen ___ dinner.", "was cooking", "were cooking", "was cook", "Past Progressive: was/were + -ing."],
+    ["I ___ when the phone rang.", "was sleeping", "were sleeping", "was sleep", "With 'I' we use 'was' + -ing."],
+    ["They ___ watching TV at eight o'clock last night.", "weren't", "wasn't", "didn't", "The negative is weren't + -ing for 'they'."],
+    ["___ you working when I called?", "Were", "Was", "Did", "'You' takes 'were' in the Past Progressive."],
+    ["She ___ listening to music at that moment.", "wasn't", "weren't", "didn't", "'She' takes wasn't."],
+    ["What ___ he doing when the lights went out?", "was", "were", "did", "'He' takes 'was'."],
+    ["While I ___ the washing-up, my brother was washing the car.", "was doing", "were doing", "was do", "Two actions at the same time: Past Progressive."],
+    ["It ___ raining when we left the house.", "was", "is", "has been", "Scene-setting in the past: was raining."],
+    ["Tom and Anna ___ having a picnic at noon.", "were", "was", "did", "Plural subject: were + -ing."],
+    ["He ___ a bath when the lights went out.", "was having", "were having", "was have", "Longer action in progress: was having."],
+    ["I was having a bath when the lights ___.", "went out", "were going out", "have gone out", "The shorter action that interrupts uses the Past Simple."],
+    ["As soon as we ___ on the island, we ran to the beach.", "arrived", "were arriving", "arrive", "'As soon as' is used with the Past Simple."],
+    ["Which sentence is correct?", "While I was doing the washing-up, my brother was washing the car.", "While I did the washing-up, my brother has washed the car.", "While I was doing the washing-up, my brother washes the car.", "Two actions at the same time: both are Past Progressive."],
+    ["She ___ along the road when she saw an accident.", "was walking", "were walking", "was walk", "The longer action is Past Progressive."],
+    ["While they ___ in the forest, they saw a bear.", "were walking", "was walking", "walks", "Longer action: were walking."],
+    ["We ___ TV when we heard a strange noise.", "were watching", "was watching", "watching", "Longer action in progress: were watching."],
+    ["The fire started while the family ___.", "was sleeping", "is sleeping", "sleeps", "Use the Past Progressive for the longer action in the past."],
+    ["When Dad came home, I ___ my homework.", "was doing", "were doing", "have done", "I was in the middle of my homework."],
+    ["He fell asleep while he ___ a book.", "was reading", "were reading", "is reading", "Longer action: was reading."],
+    ["___ I got home, I made a sandwich. (immediately after)", "As soon as", "While", "During", "'As soon as' means immediately after."],
+    ["I saw a bear ___ I was walking in the forest.", "while", "during", "for", "'While' introduces a longer action."],
+    ["She ___ a shower when the phone rang.", "was taking", "were taking", "is taking", "Longer action interrupted by the phone: was taking."],
+    ["___ wonderful!", "How", "What", "Such", "How + adjective! (How wonderful!)"],
+    ["___ a beautiful day!", "What", "How", "So", "What + a + adjective + noun!"],
+    ["She sings ___ beautifully!", "so", "such", "what", "so + adverb"],
+    ["It was ___ funny!", "so", "such", "what", "so + adjective"],
+    ["He is ___ an unusual man!", "such", "so", "how", "such + a/an + adjective + noun"],
+    ["___ an unusual man he is!", "What", "How", "So", "What + a/an + adjective + noun!"],
+    ["___ well she plays the piano!", "How", "What", "Such", "How + adverb!"],
+    ["They live in ___ a big house!", "such", "so", "what", "such + a + adjective + noun"],
+    ["He was ___ bored that he left before the end of the film.", "so", "such", "too", "so + adjective + that"],
+    ["It was ___ a hot day that we all went swimming.", "such", "so", "too", "such + a + adjective + noun + that"],
+    ["She spoke ___ quietly that nobody could hear her.", "so", "such", "very", "so + adverb + that"],
+    ["It was ___ cold weather that we stayed at home.", "such", "so", "too", "such + adjective + uncountable noun + that"],
+    ["We had ___ a good time that we didn't want to leave.", "such", "so", "very", "such + a + adjective + noun + that"],
+    ["The film was so boring ___ I fell asleep.", "that", "what", "which", "so + adjective + that + result"],
+    ["There were ___ many people that we couldn't find a seat.", "so", "such", "too", "so many / so much (not such)"],
+    ["He ate ___ much food that he felt ill.", "so", "such", "very", "so much / so many"],
+    ["It was ___ interesting book that I read it twice.", "such an", "so an", "such", "such + a/an + adjective + noun"],
+    ["Which sentence is correct?", "It was such a hot day that we went swimming.", "It was so a hot day that we went swimming.", "It was such hot that we went swimming.", "such + a + adjective + noun + that"],
+    ["I ___ my keys. Can you help me look for them?", "have lost", "has lost", "had lost", "A past action with a result now: have + past participle."],
+    ["She has just ___ home.", "come", "came", "coming", "After has/have we use the past participle."],
+    ["Have you ever ___ sushi?", "eaten", "ate", "eat", "The past participle of eat is eaten."],
+    ["They haven't ___ the film yet.", "seen", "saw", "see", "haven't + past participle"],
+    ["He has never ___ a lion.", "seen", "saw", "see", "has never + past participle"],
+    ["We ___ already finished our homework.", "have", "has", "did", "'We' takes 'have'."],
+    ["Mark ___ this car since September.", "has had", "had", "has have", "'Since' needs the Present Perfect."],
+    ["It's the first time I ___ an email from Martin.", "have received", "received", "am receiving", "'It's the first time' is followed by the Present Perfect."],
+    ["This is the best film I have ever ___.", "seen", "saw", "see", "Superlative + ever + Present Perfect."],
+    ["How many countries ___ you visited?", "have", "did", "are", "Present Perfect question: have + subject + past participle."],
+    ["I ___ Mexican food last night.", "tasted", "have tasted", "taste", "A definite time in the past: Past Simple."],
+    ["I ___ Mexican food several times in my life.", "have tasted", "tasted", "was tasting", "A period up to now: Present Perfect."],
+    ["Ted ___ as a waiter when he was a student.", "worked", "has worked", "works", "A finished period in the past: Past Simple."],
+    ["Ted ___ as a waiter for two years. He is still working there.", "has worked", "worked", "was working", "Still true now: Present Perfect."],
+    ["We ___ to Paris in 2019.", "went", "have gone", "have been", "A definite time (2019): Past Simple."],
+    ["She ___ her phone yesterday.", "lost", "has lost", "loses", "'Yesterday' needs the Past Simple."],
+    ["I ___ him three times this morning, but he doesn't answer.", "have called", "called", "was calling", "The result matters now: Present Perfect."],
+    ["Which sentence is correct?", "I saw that film last week.", "I have seen that film last week.", "I have saw that film last week.", "With 'last week' we use the Past Simple."],
+    ["I've had this car ___ 2001.", "since", "for", "during", "'Since' + a point in time."],
+    ["I've had this car ___ ten years.", "for", "since", "from", "'For' + a period of time."],
+    ["She has worked here ___ three months.", "for", "since", "ago", "'For' + a period of time."],
+    ["They have lived in Athens ___ they were born.", "since", "for", "while", "'Since' + a past moment or clause."],
+    ["Julia has changed jobs three times ___ she came to Luton.", "since", "for", "ago", "'Since' + a past event."],
+    ["How ___ have you known him?", "long", "much", "often", "'How long' asks about duration."],
+    ["The children ___ watching TV for four hours.", "have been", "has been", "are been", "have been + -ing"],
+    ["He is exhausted. He ___ cleaning the house all day.", "has been", "have been", "is been", "'He' takes 'has been'."],
+    ["I've been ___ for you since nine o'clock.", "waiting", "wait", "waited", "have been + -ing"],
+    ["How long ___ you been learning English?", "have", "has", "did", "How long + have + subject + been + -ing"],
+    ["She ___ not been sleeping well recently.", "has", "have", "did", "'She' takes 'has'."],
+    ["It ___ raining all day. The streets are wet.", "has been", "have been", "was been", "'It' takes 'has been'."],
+    ["We ___ been waiting for an hour.", "have", "has", "did", "'We' takes 'have'."],
+    ["Which sentence is correct?", "I've been studying since 9 o'clock.", "I've been studying since three hours.", "I study since 9 o'clock.", "'Since' + a point in time with the Present Perfect Progressive."],
+    ["I ___ three emails this morning. (the result)", "have written", "have been writing", "am written", "The Simple emphasises the result."],
+    ["I ___ emails since nine o'clock. (how long)", "have been writing", "have written", "wrote", "The Progressive emphasises the duration."],
+    ["She ___ ten kilometres today. (she finished it)", "has run", "has been running", "runs", "The Simple emphasises the result."],
+    ["He ___ the guitar for two hours, so his fingers hurt.", "has been playing", "has played", "plays", "The Progressive emphasises the duration."],
+    ["Joan ___ to the gym. She's still there.", "has gone", "has been", "went", "'Has gone' = she is still there."],
+    ["Joan ___ to China. Now she's back home.", "has been", "has gone", "is going", "'Has been' = she has come back."],
+    ["Where's Tom? He ___ to the shop. He'll be back in five minutes.", "has gone", "has been", "went", "He is still at the shop: has gone."],
+    ["I ___ to London three times, but I have never been to Paris.", "have been", "have gone", "was going", "'Have been' = visited and returned."],
+    ["She is the girl ___ lives next door.", "who", "which", "whose", "'Who' is used for people."],
+    ["The book ___ you bought is on the desk.", "that", "who", "whose", "'That' (or 'which') is used for things."],
+    ["That is the man ___ car was stolen.", "whose", "who", "which", "'Whose' shows possession."],
+    ["This is the town ___ I was born.", "where", "which", "who", "'Where' is used for places."],
+    ["Which sentence is correct?", "Mrs Robins is the teacher I like the most.", "Mrs Robins is the teacher who like the most.", "Mrs Robins is the teacher whose I like the most.", "We can leave out 'who' when it is the object of the verb."],
+    ["The chair on ___ I'm sitting isn't very comfortable.", "which", "that", "who", "After a preposition (formal) we use 'which', not 'that'."],
+    ["The film ___ we saw yesterday was boring.", "that", "who", "whose", "'That' for a thing."],
+    ["I met a boy ___ brother is a famous singer.", "whose", "who", "which", "'Whose' = of whom."],
+    ["The woman ___ works in the bank is my aunt.", "who", "which", "where", "'Who' for a person."],
+    ["Which sentence is correct?", "The man who lives next door is a doctor.", "The man lives next door is a doctor.", "The man which lives next door is a doctor.", "'Who' is the subject here, so it cannot be left out."],
+    ["Mr Brown, ___ is our geography teacher, is quite old.", "who", "that", "whose", "In non-defining clauses we cannot use 'that'."],
+    ["Our car, ___ cost us a lot, keeps breaking down.", "which", "that", "what", "'Which' (not 'that') after a comma."],
+    ["Which sentence is correct?", "My sister, who lives in Crete, is a nurse.", "My sister who lives in Crete, is a nurse.", "My sister, that lives in Crete, is a nurse.", "Non-defining clauses are separated by commas."],
+    ["He offered to give me a lift, ___ was very kind of him.", "which", "who", "that", "'Which' can refer to a whole sentence."],
+    ["This cupboard, in ___ I keep my old toys, hasn't been cleaned for ages.", "which", "that", "who", "Preposition + which at the beginning."],
+    ["Athens, ___ is the capital of Greece, is a very old city.", "which", "that", "where", "'Which' for a place as the subject."],
+    ["Peter is ___ than James.", "taller", "tall", "more tall", "One-syllable adjectives take -er."],
+    ["This is the ___ interesting book I've ever read.", "most", "more", "very", "Long adjectives: the most + adjective."],
+    ["My brother drives the most ___ of all of us.", "carefully", "careful", "more carefully", "Adverb: the most carefully."],
+    ["Living in the city is ___ than living in a village.", "more expensive", "expensiver", "most expensive", "Long adjectives: more + adjective + than."],
+    ["Summer is the ___ season of the year.", "hottest", "hotter", "most hot", "One syllable: the + -est (hot-hotter-hottest)."],
+    ["She runs ___ than her sister.", "faster", "more fast", "fastest", "Short adverbs take -er."],
+    ["happy - happier - ___", "the happiest", "the most happy", "the happyest", "Adjectives ending in -y: y becomes i + est."],
+    ["early - earlier - ___", "the earliest", "the most early", "the earlyest", "'Early' takes -er/-est."],
+    ["This exercise is ___ than the last one.", "easier", "more easy", "easyer", "Easy - easier - easiest."],
+    ["Of all the students, Maria writes ___.", "the most neatly", "neatlier", "the neatliest", "Adverbs of two or more syllables: the most + adverb."],
+    ["good - better - ___", "the best", "the goodest", "the most good", "Irregular: good - better - best."],
+    ["This is the ___ day of my life!", "worst", "baddest", "most bad", "Irregular: bad - worse - worst."],
+    ["I have ___ money than you.", "less", "littler", "lesser", "Irregular: little - less - least."],
+    ["Tokyo is ___ from Athens than Rome is.", "further", "farer", "more far", "Irregular: far - farther/further."],
+    ["The jumper is ___ expensive than the shirt.", "less", "fewer", "least", "less + adjective + than"],
+    ["This is the ___ interesting book in the world!", "least", "less", "fewest", "the least + adjective"],
+    ["Kelly runs as fast ___ Linda.", "as", "than", "that", "as + adjective/adverb + as"],
+    ["The skirt is ___ colourful as the shirt.", "as", "than", "more", "as ... as"],
+    ["Kelly doesn't run as ___ fast as Linda.", "as", "more", "very", "not as/so + adjective + as"],
+    ["The car was going faster ___ faster.", "and", "than", "or", "comparative + and + comparative"],
+    ["The more you study, ___ more you learn.", "the", "a", "than", "the + comparative, the + comparative"],
+    ["She is ___ prettier than her friend Sally.", "much", "most", "very", "much + comparative"],
+    ["This test is a bit ___ than the last one.", "more difficult", "most difficult", "difficulter", "a bit + comparative"],
+    ["Which sentence is correct?", "The harder you try, the better you get.", "The more hard you try, the more good you get.", "The harder you try, the best you get.", "the + comparative, the + comparative"]
   ]
 );
 const EB1_BANK=bank(
@@ -5266,7 +5595,11 @@ function dayOfYear(now){
 // the day count to start from the school year, not the calendar year,
 // so day 1 actually lines up with the first thing taught in class.
 // Everything else keeps cycling through its bank by plain day-of-year.
-const ORDERED_CLASSES=new Set(["EB","EB1","EJAB","EB12","EA1","EA","DB"]);
+const ORDERED_CLASSES=new Set(["EB","EB1","EJAB","EB12","EA1","EA","DB","EA2"]);
+// Some ordered classes have a much bigger bank than there are school days (EA2: 40 items per book module),
+// so they advance several items per day and still reach the end of the book in time.
+const CLASS_PACE={EA2:2};
+function paceFor(classCode){ return CLASS_PACE[classCode]||1; }
 function termDayIndex(now){
   const y=now.getFullYear(), m=now.getMonth(); // Jan=0 ... Dec=11
   const start = m>=9 ? new Date(y,9,1) : new Date(y-1,9,1); // Oct 1
@@ -5420,7 +5753,7 @@ function pickQuestion(classCode,dayIndex){
   const b=classBank(classCode);
   const type=questionTypeFor(dayIndex,classCode);
   const arr=b[type];
-  return {q:arr[((dayIndex-1)%arr.length+arr.length)%arr.length],type};
+  return {q:arr[(((dayIndex-1)*paceFor(classCode))%arr.length+arr.length)%arr.length],type};
 }
 
 // --- CONTESTS: pick 10 random questions from material already covered
@@ -5460,8 +5793,8 @@ function pickContestQuestions(classCode){
   const dayIndex=dayIndexFor(classCode,now);
   const pool=[];
   if(ORDERED_CLASSES.has(classCode)){
-    pool.push(...b.lexis.slice(0,Math.max(1,Math.min(b.lexis.length,dayIndex))));
-    pool.push(...b.grammar.slice(0,Math.max(1,Math.min(b.grammar.length,dayIndex))));
+    pool.push(...b.lexis.slice(0,Math.max(1,Math.min(b.lexis.length,dayIndex*paceFor(classCode)))));
+    pool.push(...b.grammar.slice(0,Math.max(1,Math.min(b.grammar.length,dayIndex*paceFor(classCode)))));
   }else{
     pool.push(...b.lexis, ...b.grammar);
   }
